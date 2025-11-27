@@ -289,3 +289,49 @@ export {
   stickySession,
 } from './cluster'
 export type { ClusterOptions, ClusterInfo, ClusterServeOptions } from './cluster'
+
+// OpenTelemetry
+export {
+  otel,
+  createTracer,
+  consoleExporter,
+  createOtlpExporter,
+  generateTraceId,
+  generateSpanId,
+  parseTraceparent,
+  formatTraceparent,
+  parseTracestate,
+  formatTracestate,
+  getSpan,
+  startChildSpan,
+  MetricsCollector,
+} from './otel'
+export type {
+  Span,
+  SpanContext,
+  SpanAttributes,
+  SpanEvent,
+  Tracer,
+  SpanExporter,
+  OtelOptions,
+  Counter,
+  Histogram,
+  Gauge,
+} from './otel'
+
+// HTTP/2
+export {
+  serveHttp2,
+  pushResource,
+  pushResources,
+  getAlpnProtocol,
+  isHttp2,
+  preloadHint,
+  preload,
+} from './http2'
+export type {
+  Http2Context,
+  Http2Options,
+  Http2ServerInstance,
+  PushOptions,
+} from './http2'
