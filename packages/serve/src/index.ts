@@ -88,3 +88,51 @@ export {
   websocket,
 } from './websocket'
 export type { WebSocketMessage, WebSocketEvents, WebSocketHandler } from './websocket'
+
+// Body/Query Parsing
+export {
+  parseQuery,
+  stringifyQuery,
+  parseFormBody,
+  parseJsonBody,
+  parseMultipart,
+  extractBoundary,
+  getContentType,
+  isJsonContent,
+  isFormContent,
+  isMultipartContent,
+} from './body'
+export type { ParsedBody, MultipartPart } from './body'
+
+// Rate Limiting
+export { rateLimit, rateLimitWithStore } from './rateLimit'
+export type { RateLimitOptions, RateLimitStore2 } from './rateLimit'
+
+// Security Headers
+export { security, strictSecurity, apiSecurity } from './security'
+export type { SecurityOptions } from './security'
+
+// Server-Sent Events
+export { SSEClient, createSSE, sseHeaders, formatSSE } from './sse'
+export type { SSEMessage } from './sse'
+
+// Request ID / Tracing
+export {
+  tracing,
+  logging,
+  getRequestId,
+  generateUUID,
+  generateShortId,
+  generateNanoId,
+} from './tracing'
+export type { TracingOptions, LoggingOptions, LogFn } from './tracing'
+
+// Proxy Headers
+export {
+  proxy,
+  trustLocalProxy,
+  trustFirstProxy,
+  getProxyInfo,
+  getClientIp,
+} from './proxy'
+export type { ProxyOptions, ProxyInfo } from './proxy'
