@@ -3,7 +3,20 @@
  */
 
 import { describe, it, expect } from 'bun:test'
-import { parseRange, contentRange, isRangeSatisfiable } from '../src/range'
+import { parseRange, contentRange, isRangeSatisfiable, acceptsRange, getRange } from '../src/range'
+
+// Mock context factory
+const createMockContext = (headers: Record<string, string> = {}): any => ({
+  method: 'GET',
+  path: '/video.mp4',
+  headers,
+  body: Buffer.alloc(0),
+  params: {},
+  query: '',
+  socket: {},
+  raw: Buffer.alloc(0),
+  json: () => ({}),
+})
 
 describe('Range Requests', () => {
   describe('parseRange', () => {
@@ -109,6 +122,137 @@ describe('Range Requests', () => {
     it('should handle small chunk request', () => {
       const result = parseRange('bytes=1000000-1999999', videoSize) // 1MB chunk
       expect(result?.ranges[0].end - result?.ranges[0].start + 1).toBe(1000000)
+    })
+  })
+
+  describe('acceptsRange', () => {
+    it('should return true when Range header is present', () => {
+      const ctx = createMockContext({ range: 'bytes=0-499' })
+      expect(acceptsRange(ctx)).toBe(true)
+    })
+
+    it('should return false when Range header is absent', () => {
+      const ctx = createMockContext({})
+      expect(acceptsRange(ctx)).toBe(false)
+    })
+
+    it('should return true for any Range header value', () => {
+      const ctx = createMockContext({ range: 'bytes=-100' })
+      expect(acceptsRange(ctx)).toBe(true)
+    })
+
+    it('should handle empty Range header', () => {
+      const ctx = createMockContext({ range: '' })
+      // Empty string is still defined (not undefined), so returns true
+      expect(acceptsRange(ctx)).toBe(true)
+    })
+  })
+
+  describe('getRange', () => {
+    it('should return range when valid Range header', () => {
+      const ctx = createMockContext({ range: 'bytes=0-499' })
+      const range = getRange(ctx, 1000)
+
+      expect(range).not.toBeNull()
+      expect(range?.start).toBe(0)
+      expect(range?.end).toBe(499)
+    })
+
+    it('should return null when no Range header', () => {
+      const ctx = createMockContext({})
+      const range = getRange(ctx, 1000)
+
+      expect(range).toBeNull()
+    })
+
+    it('should return null for invalid Range header', () => {
+      const ctx = createMockContext({ range: 'invalid' })
+      const range = getRange(ctx, 1000)
+
+      expect(range).toBeNull()
+    })
+
+    it('should return first range for multi-range request', () => {
+      const ctx = createMockContext({ range: 'bytes=0-99, 200-299' })
+      const range = getRange(ctx, 1000)
+
+      expect(range).not.toBeNull()
+      expect(range?.start).toBe(0)
+      expect(range?.end).toBe(99)
+    })
+
+    it('should return null for unsatisfiable range', () => {
+      const ctx = createMockContext({ range: 'bytes=1000-1500' })
+      const range = getRange(ctx, 500)
+
+      expect(range).toBeNull()
+    })
+
+    it('should handle suffix range', () => {
+      const ctx = createMockContext({ range: 'bytes=-100' })
+      const range = getRange(ctx, 1000)
+
+      expect(range).not.toBeNull()
+      expect(range?.start).toBe(900)
+      expect(range?.end).toBe(999)
+    })
+
+    it('should handle open-ended range', () => {
+      const ctx = createMockContext({ range: 'bytes=500-' })
+      const range = getRange(ctx, 1000)
+
+      expect(range).not.toBeNull()
+      expect(range?.start).toBe(500)
+      expect(range?.end).toBe(999)
+    })
+
+    it('should clamp end to file size', () => {
+      const ctx = createMockContext({ range: 'bytes=0-2000' })
+      const range = getRange(ctx, 1000)
+
+      expect(range).not.toBeNull()
+      expect(range?.end).toBe(999)
+    })
+  })
+
+  describe('edge cases', () => {
+    it('should handle zero-byte file', () => {
+      const result = parseRange('bytes=0-', 0)
+      expect(result).toBeNull()
+    })
+
+    it('should handle very large file sizes', () => {
+      const largeSize = 10 * 1024 * 1024 * 1024 // 10GB
+      const result = parseRange('bytes=0-1048575', largeSize)
+      expect(result?.ranges[0]).toEqual({ start: 0, end: 1048575 })
+    })
+
+    it('should handle range at end of large file', () => {
+      const largeSize = 10 * 1024 * 1024 * 1024 // 10GB
+      const result = parseRange(`bytes=${largeSize - 1000}-`, largeSize)
+      expect(result?.ranges[0].start).toBe(largeSize - 1000)
+      expect(result?.ranges[0].end).toBe(largeSize - 1)
+    })
+
+    it('should handle whitespace in range spec', () => {
+      const result = parseRange('bytes=  0 - 499  ', 1000)
+      // Implementation may or may not trim - check actual behavior
+      expect(result).not.toBeNull()
+    })
+
+    it('should reject negative start', () => {
+      const result = parseRange('bytes=-0-500', 1000)
+      expect(result).toBeNull()
+    })
+
+    it('should handle single byte range', () => {
+      const result = parseRange('bytes=0-0', 1000)
+      expect(result?.ranges[0]).toEqual({ start: 0, end: 0 })
+    })
+
+    it('should handle last byte request', () => {
+      const result = parseRange('bytes=-1', 1000)
+      expect(result?.ranges[0]).toEqual({ start: 999, end: 999 })
     })
   })
 })
