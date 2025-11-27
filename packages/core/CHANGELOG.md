@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 (2025-11-27)
+
+### 🐛 Bug Fixes
+
+- **build:** compile TypeScript to JavaScript before publishing ([2ef1667](https://github.com/SylphxAI/gust/commit/2ef16670ce02e87daeb2400721920b0f99c0b459))
+
 ## 0.1.1 (2025-11-27)
 
 ### ✨ Features
