@@ -6,7 +6,7 @@ High performance functional HTTP server powered by WASM.
 
 - **Fast** - WASM-powered HTTP parser and Radix Trie router
 - **Functional** - Composable middleware with `pipe()` and `compose()`
-- **Type-safe** - Full TypeScript support
+- **Type-safe** - Full TypeScript support with path param inference
 - **Zero dependencies** - Core functionality built-in
 - **Bun-first** - Optimized for Bun runtime
 
@@ -32,12 +32,16 @@ bun add @sylphx/gust
 ```typescript
 import { serve, router, get, json } from '@sylphx/gust'
 
-const app = router([
-  get('/', () => json({ message: 'Hello World' })),
-  get('/users/:id', (ctx) => json({ id: ctx.params.id })),
-])
+const home = get('/', () => json({ message: 'Hello World' }))
+const user = get('/users/:id', (ctx) => json({ id: ctx.params.id }))
 
-serve({ port: 3000, fetch: app })
+const app = router({ home, user })
+
+// Type-safe URL generation
+app.url.home()           // "/"
+app.url.user({ id: 42 }) // "/users/42"
+
+serve({ port: 3000, fetch: app.handler })
 ```
 
 ## Examples
@@ -56,27 +60,34 @@ import {
   compress,
   rateLimit,
   jwtAuth,
+  getJwtPayload,
+  parseJsonBody,
 } from '@sylphx/gust'
+
+// Public routes
+const health = get('/health', () => json({ status: 'ok' }))
+
+// Protected routes
+const me = get('/me', (ctx) => json(getJwtPayload(ctx)))
+const createPost = post('/posts', async (ctx) => {
+  const body = await parseJsonBody(ctx)
+  return json({ created: body })
+})
+
+const protectedRoutes = compose(
+  jwtAuth({ secret: process.env.JWT_SECRET! }),
+  router({ me, createPost }).handler
+)
+
+const publicRoutes = router({ health }).handler
 
 const app = compose(
   cors(),
   compress(),
   rateLimit({ max: 100, window: 60000 }),
-  router([
-    get('/health', () => json({ status: 'ok' })),
-
-    // Protected routes
-    compose(
-      jwtAuth({ secret: process.env.JWT_SECRET }),
-      router([
-        get('/me', (ctx) => json(getJwtPayload(ctx))),
-        post('/posts', async (ctx) => {
-          const body = await parseJsonBody(ctx)
-          return json({ created: body })
-        }),
-      ])
-    ),
-  ])
+  (ctx) => ctx.path.startsWith('/me') || ctx.path.startsWith('/posts')
+    ? protectedRoutes(ctx)
+    : publicRoutes(ctx)
 )
 
 serve({ port: 3000, fetch: app })
@@ -100,14 +111,20 @@ serve({
 ### Static Files
 
 ```typescript
-import { serve, serveStatic, router, get } from '@sylphx/gust'
+import { serve, serveStatic, router, get, json } from '@sylphx/gust'
 
-const app = router([
-  get('/api/*', apiHandler),
-  serveStatic({ root: './public' }),
-])
+const api = get('/api/hello', () => json({ hello: 'world' }))
+const app = router({ api })
 
-serve({ port: 3000, fetch: app })
+serve({
+  port: 3000,
+  fetch: (ctx) => {
+    if (ctx.path.startsWith('/api')) {
+      return app.handler(ctx)
+    }
+    return serveStatic({ root: './public' })(ctx)
+  },
+})
 ```
 
 ### Health Checks (Kubernetes)
@@ -115,24 +132,21 @@ serve({ port: 3000, fetch: app })
 ```typescript
 import { serve, router, get, liveness, readiness, health, memoryCheck } from '@sylphx/gust'
 
-const app = router([
-  get('/healthz', liveness()),
-  get('/ready', readiness([memoryCheck(90)])),
-  get('/health', health({
-    checks: [memoryCheck(90)],
-    detailed: true,
-  })),
-])
+const live = get('/healthz', liveness())
+const ready = get('/ready', readiness([memoryCheck(90)]))
+const detailed = get('/health', health({ checks: [memoryCheck(90)], detailed: true }))
 
-serve({ port: 3000, fetch: app })
+const app = router({ live, ready, detailed })
+
+serve({ port: 3000, fetch: app.handler })
 ```
 
 ### Validation
 
 ```typescript
-import { serve, router, post, validate, object, string, email, number } from '@sylphx/gust'
+import { serve, router, post, json, compose, validate, object, string, email, number, getValidated } from '@sylphx/gust'
 
-const createUser = compose(
+const createUser = post('/users', compose(
   validate({
     body: object({
       name: string({ minLength: 1 }),
@@ -144,36 +158,35 @@ const createUser = compose(
     const data = getValidated(ctx)
     return json({ user: data })
   }
-)
+))
 
-const app = router([
-  post('/users', createUser),
-])
+const app = router({ createUser })
 
-serve({ port: 3000, fetch: app })
+serve({ port: 3000, fetch: app.handler })
 ```
 
 ### Session & CSRF
 
 ```typescript
-import { serve, router, get, post, session, csrf, getCsrfToken, getSession } from '@sylphx/gust'
+import { serve, router, get, post, html, json, compose, session, csrf, getCsrfToken, getSession } from '@sylphx/gust'
+
+const form = get('/form', (ctx) => html(`
+  <form method="POST" action="/submit">
+    <input type="hidden" name="_csrf" value="${getCsrfToken(ctx)}">
+    <button type="submit">Submit</button>
+  </form>
+`))
+
+const submit = post('/submit', (ctx) => {
+  const sess = getSession(ctx)
+  sess.data.visits = ((sess.data.visits as number) || 0) + 1
+  return json({ visits: sess.data.visits })
+})
 
 const app = compose(
   session({ secret: 'your-secret' }),
   csrf({ secret: 'csrf-secret' }),
-  router([
-    get('/form', (ctx) => html(`
-      <form method="POST" action="/submit">
-        <input type="hidden" name="_csrf" value="${getCsrfToken(ctx)}">
-        <button type="submit">Submit</button>
-      </form>
-    `)),
-    post('/submit', (ctx) => {
-      const sess = getSession(ctx)
-      sess.visits = (sess.visits || 0) + 1
-      return json({ visits: sess.visits })
-    }),
-  ])
+  router({ form, submit }).handler
 )
 
 serve({ port: 3000, fetch: app })
@@ -182,40 +195,38 @@ serve({ port: 3000, fetch: app })
 ### Circuit Breaker
 
 ```typescript
-import { serve, circuitBreaker, router, get } from '@sylphx/gust'
+import { serve, router, get, json, compose, circuitBreaker } from '@sylphx/gust'
 
-const app = router([
-  get('/external', compose(
-    circuitBreaker({
-      failureThreshold: 5,
-      resetTimeout: 30000,
-    }),
-    async () => {
-      const res = await fetch('https://external-api.com/data')
-      return json(await res.json())
-    }
-  )),
-])
+const external = get('/external', compose(
+  circuitBreaker({
+    failureThreshold: 5,
+    resetTimeout: 30000,
+  }),
+  async () => {
+    const res = await fetch('https://api.example.com/data')
+    return json(await res.json())
+  }
+))
 
-serve({ port: 3000, fetch: app })
+const app = router({ external })
+
+serve({ port: 3000, fetch: app.handler })
 ```
 
 ### OpenTelemetry
 
 ```typescript
-import { serve, otel, createTracer, consoleExporter } from '@sylphx/gust'
+import { serve, router, get, json, compose, otel, createTracer, consoleExporter } from '@sylphx/gust'
 
-const tracer = createTracer({
-  serviceName: 'my-service',
-  exporter: consoleExporter(),
+const tracer = createTracer(consoleExporter)
+
+const hello = get('/', () => json({ hello: 'world' }))
+const app = router({ hello })
+
+serve({
+  port: 3000,
+  fetch: compose(otel({ tracer }), app.handler),
 })
-
-const app = compose(
-  otel({ tracer }),
-  router([...])
-)
-
-serve({ port: 3000, fetch: app })
 ```
 
 ### Cluster Mode
@@ -223,14 +234,13 @@ serve({ port: 3000, fetch: app })
 ```typescript
 import { clusterServe, router, get, json } from '@sylphx/gust'
 
-const app = router([
-  get('/', () => json({ pid: process.pid })),
-])
+const index = get('/', () => json({ pid: process.pid }))
+const app = router({ index })
 
 clusterServe({
   port: 3000,
-  fetch: app,
-  workers: 4, // or 'auto' for CPU count
+  fetch: app.handler,
+  workers: 4,
 })
 ```
 
@@ -246,11 +256,11 @@ text('Hello')                      // text/plain
 html('<h1>Hello</h1>')            // text/html
 redirect('/new-path')              // 302 redirect
 redirect('/new-path', 301)         // 301 redirect
-notFound('Not found')              // 404
-badRequest('Invalid input')        // 400
-unauthorized('Login required')     // 401
-forbidden('Access denied')         // 403
-serverError('Something broke')     // 500
+notFound()                         // 404
+badRequest()                       // 400
+unauthorized()                     // 401
+forbidden()                        // 403
+serverError()                      // 500
 ```
 
 ### Composition
@@ -259,10 +269,37 @@ serverError('Something broke')     // 500
 import { compose, pipe } from '@sylphx/gust'
 
 // compose: right-to-left (outer to inner)
-const app = compose(cors(), compress(), router([...]))
+const app = compose(cors(), compress(), handler)
 
 // pipe: left-to-right (first to last)
-const app = pipe(router([...]), compress(), cors())
+const app = pipe(handler, compress(), cors())
+```
+
+### Type-Safe Routes
+
+```typescript
+import { router, get, post, prefix, merge } from '@sylphx/gust'
+
+// Routes with typed params
+const user = get('/users/:id', (ctx) => {
+  ctx.params.id  // string (type-safe!)
+  return json({ id: ctx.params.id })
+})
+
+const post = get('/users/:userId/posts/:postId', (ctx) => {
+  ctx.params.userId  // string
+  ctx.params.postId  // string
+  return json(ctx.params)
+})
+
+// Named routes with URL generation
+const app = router({ user, post })
+app.url.user({ id: 42 })                    // "/users/42"
+app.url.post({ userId: 1, postId: 99 })     // "/users/1/posts/99"
+
+// Route composition
+const apiRoutes = prefix('/api', { user, post })
+const allRoutes = merge(apiRoutes, otherRoutes)
 ```
 
 ## License

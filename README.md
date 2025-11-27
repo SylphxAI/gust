@@ -2,7 +2,7 @@
 
 > High-performance WASM-powered HTTP server framework for Bun
 
-[![CI](https://github.com/aspect-build/serve/actions/workflows/ci.yml/badge.svg)](https://github.com/aspect-build/serve/actions/workflows/ci.yml)
+[![CI](https://github.com/SylphxAI/gust/actions/workflows/ci.yml/badge.svg)](https://github.com/SylphxAI/gust/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@sylphx/gust)](https://www.npmjs.com/package/@sylphx/gust)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -15,11 +15,11 @@
 
 ## Features
 
-- 🚀 **WASM-powered** - Ultra-fast HTTP parsing via WebAssembly
+- 🚀 **WASM-powered** - Ultra-fast HTTP parsing and Radix Trie routing
 - 🔒 **Security** - Built-in CORS, CSRF, rate limiting, JWT auth
 - 📦 **Zero config** - Sensible defaults, works out of the box
-- 🎯 **Type-safe** - Full TypeScript support with strict types
-- ⚡ **Streaming** - SSE, WebSocket-ready, range requests for media
+- 🎯 **Type-safe** - Full TypeScript support with path param inference
+- ⚡ **Streaming** - SSE, WebSocket, range requests for media
 - 🏥 **Production-ready** - Health checks, graceful shutdown, OpenTelemetry
 
 ## Quick Start
@@ -29,18 +29,27 @@ bun add @sylphx/gust
 ```
 
 ```typescript
-import { serve, router, json, compose, cors, rateLimit } from '@sylphx/gust'
+import { serve, router, get, json, compose, cors, rateLimit } from '@sylphx/gust'
 
-const app = compose(
+// Define routes
+const home = get('/', () => json({ message: 'Hello World!' }))
+const user = get('/users/:id', (ctx) => json({ id: ctx.params.id }))
+
+// Create router with named routes
+const app = router({ home, user })
+
+// Type-safe URL generation
+app.url.home()           // "/"
+app.url.user({ id: 42 }) // "/users/42"
+
+// Apply middleware and serve
+const handler = compose(
   cors(),
-  rateLimit({ max: 100, window: 60000 })
+  rateLimit({ max: 100, window: 60000 }),
+  app.handler
 )
 
-const routes = router()
-  .get('/', () => json({ message: 'Hello World!' }))
-  .get('/users/:id', (ctx) => json({ id: ctx.params.id }))
-
-serve(app(routes.handler()), { port: 3000 })
+serve({ port: 3000, fetch: handler })
 ```
 
 ## Documentation
@@ -58,9 +67,6 @@ bun install
 # Run tests
 bun test
 
-# Build WASM
-bun run build:wasm
-
 # Type check
 bun run typecheck
 
@@ -70,7 +76,7 @@ bun run lint
 
 ## License
 
-MIT © Aspect Build Systems
+MIT
 
 ---
 
