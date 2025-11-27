@@ -49,7 +49,12 @@ export type Server = {
   readonly port: number
   readonly hostname: string
   readonly tls: boolean
+  /** Stop server immediately */
   readonly stop: () => Promise<void>
+  /** Graceful shutdown - wait for active requests to complete */
+  readonly shutdown: (timeout?: number) => Promise<void>
+  /** Get active connection count */
+  readonly connections: () => number
 }
 
 /**
@@ -68,6 +73,10 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
   const requestTimeout = options.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
   const maxHeaderSize = options.maxHeaderSize ?? DEFAULT_MAX_HEADER_SIZE
   const useTls = !!options.tls
+
+  // Track active connections for graceful shutdown
+  const activeConnections = new Set<Socket | TLSSocket>()
+  let isShuttingDown = false
 
   const connectionConfig: ConnectionConfig = {
     keepAliveTimeout,
@@ -88,10 +97,22 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
             passphrase: options.tls!.passphrase,
           },
           (socket: TLSSocket) => {
+            if (isShuttingDown) {
+              socket.end()
+              return
+            }
+            activeConnections.add(socket)
+            socket.on('close', () => activeConnections.delete(socket))
             handleConnection(socket, handler, wasm, connectionConfig)
           }
         )
       : createServer((socket: Socket) => {
+          if (isShuttingDown) {
+            socket.end()
+            return
+          }
+          activeConnections.add(socket)
+          socket.on('close', () => activeConnections.delete(socket))
           handleConnection(socket, handler, wasm, connectionConfig)
         })
 
@@ -102,9 +123,42 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
         port,
         hostname,
         tls: useTls,
+        connections: () => activeConnections.size,
         stop: () =>
           new Promise((res) => {
+            // Force close all connections
+            for (const socket of activeConnections) {
+              socket.destroy()
+            }
+            activeConnections.clear()
             server.close(() => res())
+          }),
+        shutdown: (timeout = 30000) =>
+          new Promise((res) => {
+            isShuttingDown = true
+
+            // Stop accepting new connections
+            server.close(() => {
+              res()
+            })
+
+            // Wait for existing connections to finish
+            const checkInterval = setInterval(() => {
+              if (activeConnections.size === 0) {
+                clearInterval(checkInterval)
+                res()
+              }
+            }, 100)
+
+            // Force close after timeout
+            setTimeout(() => {
+              clearInterval(checkInterval)
+              for (const socket of activeConnections) {
+                socket.destroy()
+              }
+              activeConnections.clear()
+              res()
+            }, timeout)
           }),
       }
 
