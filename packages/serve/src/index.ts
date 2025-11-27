@@ -57,3 +57,7 @@ export type { Context } from './context'
 // Static file serving
 export { serveStatic } from './static'
 export type { StaticOptions } from './static'
+
+// CORS
+export { cors, simpleCors } from './cors'
+export type { CorsOptions } from './cors'
