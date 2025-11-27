@@ -1,15 +1,37 @@
 {
-  "name": "serve-monorepo",
-  "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
-  "scripts": {
-    "build:wasm": "cd packages/core && bun run build:wasm",
-    "example": "bun run packages/serve/examples/basic.ts"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "typescript": "^5"
-  }
+	"name": "gust-monorepo",
+	"description": "High-performance WASM-powered HTTP server framework for Bun",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/aspect-build/gust"
+	},
+	"private": true,
+	"workspaces": [
+		"packages/*"
+	],
+	"scripts": {
+		"build:wasm": "cd packages/core && bun run build:wasm",
+		"example": "bun run packages/serve/examples/basic.ts",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"build": "turbo build",
+		"test": "turbo test",
+		"typecheck": "turbo typecheck",
+		"prepublishOnly": "bunx @sylphx/doctor prepublish"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.8",
+		"@sylphx/biome-config": "^0.4.0",
+		"@sylphx/bump": "^1.0.0",
+		"@sylphx/tsconfig": "^0.3.0",
+		"@types/bun": "latest",
+		"@types/node": "^24.10.1",
+		"lefthook": "^2.0.4",
+		"turbo": "^2.6.1",
+		"typescript": "^5"
+	},
+	"dependencies": {
+		"@sylphx/doctor": "^1.24.0"
+	},
+	"type": "module"
 }

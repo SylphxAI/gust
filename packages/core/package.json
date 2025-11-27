@@ -1,28 +1,35 @@
 {
-  "name": "@aspect/serve-core",
-  "version": "0.1.0",
-  "description": "High performance WASM HTTP parser and Radix Trie router - works in browser and server",
-  "type": "module",
-  "main": "src/index.ts",
-  "module": "src/index.ts",
-  "types": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts",
-    "./wasm": "./src/wasm/serve_core.js"
-  },
-  "scripts": {
-    "build:wasm": "cd crates/serve-core && wasm-pack build --target web --release && cp -r pkg ../../src/wasm"
-  },
-  "keywords": [
-    "http",
-    "parser",
-    "router",
-    "wasm",
-    "rust",
-    "radix-trie",
-    "browser",
-    "server"
-  ],
-  "license": "MIT",
-  "sideEffects": false
+	"name": "@sylphx/gust-core",
+	"version": "0.1.0",
+	"description": "WASM HTTP parser and Radix Trie router - works in browser and server",
+	"type": "module",
+	"main": "src/index.ts",
+	"module": "src/index.ts",
+	"types": "src/index.ts",
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"import": "./src/index.ts",
+			"default": "./src/index.ts"
+		},
+		"./wasm": {
+			"import": "./src/wasm/serve_core.js",
+			"default": "./src/wasm/serve_core.js"
+		}
+	},
+	"scripts": {
+		"build:wasm": "cd crates/serve-core && wasm-pack build --target web --release && cp -r pkg ../../src/wasm"
+	},
+	"keywords": [
+		"gust",
+		"sylphx",
+		"http",
+		"parser",
+		"router",
+		"wasm",
+		"rust",
+		"radix-trie"
+	],
+	"license": "MIT",
+	"sideEffects": false
 }

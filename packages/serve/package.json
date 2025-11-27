@@ -1,27 +1,47 @@
 {
-  "name": "@aspect/serve",
-  "version": "0.1.0",
-  "description": "High performance functional HTTP server powered by WASM",
-  "type": "module",
-  "main": "src/index.ts",
-  "module": "src/index.ts",
-  "types": "src/index.ts",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "scripts": {
-    "example": "bun run examples/basic.ts"
-  },
-  "keywords": [
-    "http",
-    "server",
-    "web",
-    "fast",
-    "functional",
-    "wasm"
-  ],
-  "license": "MIT",
-  "dependencies": {
-    "@aspect/serve-core": "workspace:*"
-  }
+	"name": "@sylphx/gust",
+	"version": "0.1.0",
+	"description": "High-performance WASM-powered HTTP server framework",
+	"type": "module",
+	"main": "src/index.ts",
+	"module": "src/index.ts",
+	"types": "src/index.ts",
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"import": "./src/index.ts",
+			"default": "./src/index.ts"
+		}
+	},
+	"scripts": {
+		"example": "bun run examples/basic.ts",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"build": "bunup",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"prepublishOnly": "bunx @sylphx/doctor prepublish"
+	},
+	"keywords": [
+		"gust",
+		"sylphx",
+		"http",
+		"server",
+		"web",
+		"fast",
+		"wasm",
+		"bun"
+	],
+	"license": "MIT",
+	"dependencies": {
+		"@sylphx/gust-core": "workspace:*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.8",
+		"@sylphx/biome-config": "^0.4.0",
+		"@sylphx/bump": "^1.0.0",
+		"@sylphx/doctor": "^1.24.0",
+		"bunup": "^0.16.10",
+		"lefthook": "^2.0.4"
+	}
 }

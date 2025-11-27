@@ -1,1 +1,1 @@
-console.log('Serve static example loaded');
+console.log('Serve static example loaded')

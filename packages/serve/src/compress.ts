@@ -3,197 +3,190 @@
  * Supports gzip, deflate, and brotli
  */
 
-import { gzipSync, deflateSync, brotliCompressSync, constants } from 'node:zlib'
+import { brotliCompressSync, constants, deflateSync, gzipSync } from 'node:zlib'
+import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
 import type { Context } from './context'
-import type { ServerResponse, Handler, Wrapper } from '@aspect/serve-core'
 
 export type CompressionOptions = {
-  /** Minimum size to compress (default: 1024 bytes) */
-  readonly threshold?: number
-  /** Compression level (1-9, default: 6) */
-  readonly level?: number
-  /** Encodings to support (default: ['br', 'gzip', 'deflate']) */
-  readonly encodings?: Array<'br' | 'gzip' | 'deflate'>
-  /** MIME types to compress */
-  readonly mimeTypes?: string[]
+	/** Minimum size to compress (default: 1024 bytes) */
+	readonly threshold?: number
+	/** Compression level (1-9, default: 6) */
+	readonly level?: number
+	/** Encodings to support (default: ['br', 'gzip', 'deflate']) */
+	readonly encodings?: Array<'br' | 'gzip' | 'deflate'>
+	/** MIME types to compress */
+	readonly mimeTypes?: string[]
 }
 
 // Default MIME types that should be compressed
 const DEFAULT_COMPRESSIBLE_TYPES = [
-  'text/html',
-  'text/plain',
-  'text/css',
-  'text/javascript',
-  'text/xml',
-  'application/json',
-  'application/javascript',
-  'application/xml',
-  'application/xhtml+xml',
-  'application/rss+xml',
-  'application/atom+xml',
-  'image/svg+xml',
+	'text/html',
+	'text/plain',
+	'text/css',
+	'text/javascript',
+	'text/xml',
+	'application/json',
+	'application/javascript',
+	'application/xml',
+	'application/xhtml+xml',
+	'application/rss+xml',
+	'application/atom+xml',
+	'image/svg+xml',
 ]
 
 /**
  * Check if content type is compressible
  */
-const isCompressible = (
-  contentType: string | undefined,
-  allowedTypes: string[]
-): boolean => {
-  if (!contentType) return false
+const isCompressible = (contentType: string | undefined, allowedTypes: string[]): boolean => {
+	if (!contentType) return false
 
-  // Extract MIME type without charset
-  const mimeType = contentType.split(';')[0].trim().toLowerCase()
+	// Extract MIME type without charset
+	const mimeType = contentType.split(';')[0]?.trim().toLowerCase() ?? ''
 
-  return allowedTypes.some((type) => {
-    if (type.endsWith('/*')) {
-      // Wildcard match (e.g., text/*)
-      return mimeType.startsWith(type.slice(0, -1))
-    }
-    return mimeType === type
-  })
+	return allowedTypes.some((type) => {
+		if (type.endsWith('/*')) {
+			// Wildcard match (e.g., text/*)
+			return mimeType.startsWith(type.slice(0, -1))
+		}
+		return mimeType === type
+	})
 }
 
 /**
  * Parse Accept-Encoding header and find best encoding
  */
 const selectEncoding = (
-  acceptEncoding: string,
-  supportedEncodings: Array<'br' | 'gzip' | 'deflate'>
+	acceptEncoding: string,
+	supportedEncodings: Array<'br' | 'gzip' | 'deflate'>
 ): 'br' | 'gzip' | 'deflate' | null => {
-  if (!acceptEncoding) return null
+	if (!acceptEncoding) return null
 
-  // Parse encodings with quality values
-  const encodings = acceptEncoding
-    .split(',')
-    .map((e) => {
-      const [name, qValue] = e.trim().split(';q=')
-      return {
-        name: name.trim().toLowerCase(),
-        q: qValue ? parseFloat(qValue) : 1,
-      }
-    })
-    .filter((e) => e.q > 0)
-    .sort((a, b) => b.q - a.q)
+	// Parse encodings with quality values
+	const encodings = acceptEncoding
+		.split(',')
+		.map((e) => {
+			const parts = e.trim().split(';q=')
+			const name = parts[0]?.trim().toLowerCase() ?? ''
+			const qValue = parts[1]
+			return {
+				name,
+				q: qValue ? parseFloat(qValue) : 1,
+			}
+		})
+		.filter((e) => e.q > 0 && e.name)
+		.sort((a, b) => b.q - a.q)
 
-  // Find first supported encoding
-  for (const { name } of encodings) {
-    if (name === 'br' && supportedEncodings.includes('br')) return 'br'
-    if (name === 'gzip' && supportedEncodings.includes('gzip')) return 'gzip'
-    if (name === 'deflate' && supportedEncodings.includes('deflate')) return 'deflate'
-    if (name === '*') {
-      // Wildcard - use first supported
-      return supportedEncodings[0] || null
-    }
-  }
+	// Find first supported encoding
+	for (const { name } of encodings) {
+		if (name === 'br' && supportedEncodings.includes('br')) return 'br'
+		if (name === 'gzip' && supportedEncodings.includes('gzip')) return 'gzip'
+		if (name === 'deflate' && supportedEncodings.includes('deflate')) return 'deflate'
+		if (name === '*') {
+			// Wildcard - use first supported
+			return supportedEncodings[0] || null
+		}
+	}
 
-  return null
+	return null
 }
 
 /**
  * Compress data with specified encoding
  */
-const compressData = (
-  data: Buffer,
-  encoding: 'br' | 'gzip' | 'deflate',
-  level: number
-): Buffer => {
-  switch (encoding) {
-    case 'br':
-      return brotliCompressSync(data, {
-        params: {
-          [constants.BROTLI_PARAM_QUALITY]: Math.min(level, 11),
-        },
-      })
-    case 'gzip':
-      return gzipSync(data, { level })
-    case 'deflate':
-      return deflateSync(data, { level })
-  }
+const compressData = (data: Buffer, encoding: 'br' | 'gzip' | 'deflate', level: number): Buffer => {
+	switch (encoding) {
+		case 'br':
+			return brotliCompressSync(data, {
+				params: {
+					[constants.BROTLI_PARAM_QUALITY]: Math.min(level, 11),
+				},
+			})
+		case 'gzip':
+			return gzipSync(data, { level })
+		case 'deflate':
+			return deflateSync(data, { level })
+	}
 }
 
 /**
  * Create compression wrapper
  */
 export const compress = (options: CompressionOptions = {}): Wrapper<Context> => {
-  const {
-    threshold = 1024,
-    level = 6,
-    encodings = ['br', 'gzip', 'deflate'],
-    mimeTypes = DEFAULT_COMPRESSIBLE_TYPES,
-  } = options
+	const {
+		threshold = 1024,
+		level = 6,
+		encodings = ['br', 'gzip', 'deflate'],
+		mimeTypes = DEFAULT_COMPRESSIBLE_TYPES,
+	} = options
 
-  return (handler: Handler<Context>): Handler<Context> => {
-    return async (ctx: Context): Promise<ServerResponse> => {
-      // Execute handler
-      const response = await handler(ctx)
+	return (handler: Handler<Context>): Handler<Context> => {
+		return async (ctx: Context): Promise<ServerResponse> => {
+			// Execute handler
+			const response = await handler(ctx)
 
-      // Skip if no body
-      if (response.body === null) {
-        return response
-      }
+			// Skip if no body
+			if (response.body === null) {
+				return response
+			}
 
-      // Skip if already encoded
-      if (response.headers['content-encoding']) {
-        return response
-      }
+			// Skip if already encoded
+			if (response.headers['content-encoding']) {
+				return response
+			}
 
-      // Check content type
-      const contentType = response.headers['content-type']
-      if (!isCompressible(contentType, mimeTypes)) {
-        return response
-      }
+			// Check content type
+			const contentType = response.headers['content-type']
+			if (!isCompressible(contentType, mimeTypes)) {
+				return response
+			}
 
-      // Get body as buffer
-      const bodyBuffer = Buffer.from(response.body)
+			// Get body as buffer
+			const bodyBuffer = Buffer.from(response.body)
 
-      // Skip if below threshold
-      if (bodyBuffer.length < threshold) {
-        return response
-      }
+			// Skip if below threshold
+			if (bodyBuffer.length < threshold) {
+				return response
+			}
 
-      // Select encoding based on Accept-Encoding
-      const acceptEncoding = ctx.headers['accept-encoding'] || ''
-      const encoding = selectEncoding(acceptEncoding, encodings)
+			// Select encoding based on Accept-Encoding
+			const acceptEncoding = ctx.headers['accept-encoding'] || ''
+			const encoding = selectEncoding(acceptEncoding, encodings)
 
-      if (!encoding) {
-        return response
-      }
+			if (!encoding) {
+				return response
+			}
 
-      // Compress the body
-      const compressed = compressData(bodyBuffer, encoding, level)
+			// Compress the body
+			const compressed = compressData(bodyBuffer, encoding, level)
 
-      // Only use compressed if smaller
-      if (compressed.length >= bodyBuffer.length) {
-        return response
-      }
+			// Only use compressed if smaller
+			if (compressed.length >= bodyBuffer.length) {
+				return response
+			}
 
-      // Return compressed response
-      return {
-        ...response,
-        body: compressed.toString('binary'),
-        headers: {
-          ...response.headers,
-          'content-encoding': encoding,
-          'content-length': compressed.length.toString(),
-          vary: response.headers['vary']
-            ? `${response.headers['vary']}, Accept-Encoding`
-            : 'Accept-Encoding',
-        },
-      }
-    }
-  }
+			// Return compressed response
+			return {
+				...response,
+				body: compressed.toString('binary'),
+				headers: {
+					...response.headers,
+					'content-encoding': encoding,
+					'content-length': compressed.length.toString(),
+					vary: response.headers.vary
+						? `${response.headers.vary}, Accept-Encoding`
+						: 'Accept-Encoding',
+				},
+			}
+		}
+	}
 }
 
 /**
  * Convenience wrapper for gzip-only compression
  */
-export const gzip = (level = 6): Wrapper<Context> =>
-  compress({ encodings: ['gzip'], level })
+export const gzip = (level = 6): Wrapper<Context> => compress({ encodings: ['gzip'], level })
 
 /**
  * Convenience wrapper for brotli-only compression
  */
-export const brotli = (level = 6): Wrapper<Context> =>
-  compress({ encodings: ['br'], level })
+export const brotli = (level = 6): Wrapper<Context> => compress({ encodings: ['br'], level })
