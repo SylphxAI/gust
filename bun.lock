@@ -178,7 +178,7 @@
 
     "@sylphx/biome-config": ["@sylphx/biome-config@0.4.0", "", { "peerDependencies": { "@biomejs/biome": "^2.0.0" } }, "sha512-fvIZ5H61VfbQzp2X2E5FoRtzUBS03rGvuaxby6MoP4fmgXaYS35CWgU+zswKoo2DAriBbIKfWkYsT/Bn2ih0HA=="],
 
-    "@sylphx/bump": ["@sylphx/bump@1.0.0", "", { "dependencies": { "citty": "^0.1.6", "consola": "^3.4.2", "defu": "^6.1.4", "picocolors": "^1.1.1", "semver": "^7.6.3", "zx": "^8.8.5" }, "bin": { "bump": "dist/cli.js" } }, "sha512-KKFORd4dYSHBTHqQICig76UssLf45emAy1Z1dfVhxBNi+VH180HMsvseiF4tEeJMUBGLo736wLQR4M+VWMwfwA=="],
+    "@sylphx/bump": ["@sylphx/bump@1.1.0", "", { "dependencies": { "citty": "^0.1.6", "consola": "^3.4.2", "defu": "^6.1.4", "picocolors": "^1.1.1", "semver": "^7.6.3", "zx": "^8.8.5" }, "bin": { "bump": "dist/cli.js" } }, "sha512-n6on2Qa1eXPupQXYmskLX6X3SdcDvPd6U9DFM+IiXrUya7Au6hxQmC+IqubpOzbfPhZ1rWpWRgKTq95UPg3HLA=="],
 
     "@sylphx/doctor": ["@sylphx/doctor@1.24.0", "", { "dependencies": { "citty": "^0.1.6", "consola": "^3.4.2", "defu": "^6.1.4", "jiti": "^2.4.2", "picocolors": "^1.1.1" }, "bin": { "doctor": "dist/cli.js" } }, "sha512-lmbmwAe4rIhDp6nIDQMeLs7hJbpBUTC79Xdv90eHqL/QUDbQu0x0oSi4acEoJ/K84BDvQ2tiAeKco1Zd8DIzLQ=="],
 
