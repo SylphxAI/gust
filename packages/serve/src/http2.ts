@@ -368,13 +368,15 @@ export const preloadHint = (
 		.join(', ')
 }
 
+type PreloadResource = { path: string; as: string; crossorigin?: boolean }
+
 /**
  * Common preload types
  */
 export const preload = {
-	script: (path: string): PushOptions => ({ path, as: 'script' }),
-	style: (path: string): PushOptions => ({ path, as: 'style' }),
-	image: (path: string): PushOptions => ({ path, as: 'image' }),
-	font: (path: string, crossorigin = true): PushOptions => ({ path, as: 'font', crossorigin }),
-	fetch: (path: string): PushOptions => ({ path, as: 'fetch' }),
+	script: (path: string): PreloadResource => ({ path, as: 'script' }),
+	style: (path: string): PreloadResource => ({ path, as: 'style' }),
+	image: (path: string): PreloadResource => ({ path, as: 'image' }),
+	font: (path: string, crossorigin = true): PreloadResource => ({ path, as: 'font', crossorigin }),
+	fetch: (path: string): PreloadResource => ({ path, as: 'fetch' }),
 }
