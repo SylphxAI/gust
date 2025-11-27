@@ -20,7 +20,7 @@
 		"example": "bun run examples/basic.ts",
 		"lint": "biome check .",
 		"format": "biome format --write .",
-		"build": "bunup",
+		"build": "bunup --no-splitting",
 		"test": "bun test",
 		"typecheck": "tsc --noEmit",
 		"prepublishOnly": "bun run build && bunx @sylphx/doctor prepublish"
