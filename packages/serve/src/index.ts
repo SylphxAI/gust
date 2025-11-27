@@ -158,3 +158,134 @@ export {
   getRange,
 } from './range'
 export type { Range, ParsedRange, RangeOptions, RangeFileOptions } from './range'
+
+// Body Size Limit
+export { bodyLimit, jsonLimit, uploadLimit, largeUploadLimit, parseSize, formatSize } from './bodyLimit'
+export type { BodyLimitOptions } from './bodyLimit'
+
+// Authentication
+export {
+  basicAuth,
+  simpleBasicAuth,
+  parseBasicAuth,
+  createBasicAuth,
+  bearerAuth,
+  parseBearerToken,
+  apiKeyAuth,
+  simpleApiKey,
+  hmacAuth,
+  generateHmac,
+  verifyHmac,
+} from './auth'
+export type { BasicAuthOptions, BearerAuthOptions, ApiKeyOptions, HmacOptions } from './auth'
+
+// JWT
+export {
+  createJwt,
+  verifyJwt,
+  decodeJwt,
+  isJwtExpired,
+  jwtAuth,
+  optionalJwt,
+  getJwtPayload,
+} from './jwt'
+export type { JwtHeader, JwtPayload, JwtOptions, VerifyOptions, JwtResult, JwtAuthOptions } from './jwt'
+
+// Session
+export {
+  session,
+  getSession,
+  MemoryStore,
+  generateSessionId,
+  flash,
+} from './session'
+export type { Session, SessionData, SessionStore, SessionOptions } from './session'
+
+// CSRF
+export {
+  csrf,
+  csrfDoubleSubmit,
+  getCsrfToken,
+  generateCsrfToken,
+  verifyCsrfToken,
+  csrfField,
+  csrfMeta,
+} from './csrf'
+export type { CsrfOptions } from './csrf'
+
+// Cache
+export {
+  cache,
+  noCache,
+  etag,
+  invalidateCache,
+  MemoryCache,
+  LRUCache,
+  defaultCacheKey,
+  varyingCacheKey,
+} from './cache'
+export type { CacheOptions, CacheStore, CacheEntry } from './cache'
+
+// Circuit Breaker
+export {
+  CircuitBreaker,
+  circuitBreaker,
+  getCircuitBreaker,
+  withCircuitBreaker,
+  bulkhead,
+} from './circuitBreaker'
+export type { CircuitState, CircuitBreakerOptions, CircuitStats, BulkheadOptions } from './circuitBreaker'
+
+// Health Check
+export {
+  health,
+  healthCheck,
+  liveness,
+  readiness,
+  startup,
+  runHealthChecks,
+  memoryCheck,
+  eventLoopCheck,
+  httpCheck,
+  customCheck,
+  metrics,
+  prometheusMetrics,
+  getMetrics,
+} from './health'
+export type { HealthStatus, HealthCheck, HealthResult, HealthOptions, Metrics } from './health'
+
+// Validation
+export {
+  validate,
+  validateBody,
+  validateQuery,
+  validateSchema,
+  createValidator,
+  getValidated,
+  getValidatedQuery,
+  // Schema builders
+  string,
+  number,
+  boolean,
+  object,
+  array,
+  email,
+  url,
+  uuid,
+  optional,
+  nullable,
+} from './validate'
+export type { Schema, Validator, ValidationError, ValidationResult, ValidateOptions } from './validate'
+
+// Cluster
+export {
+  ClusterManager,
+  clusterServe,
+  runCluster,
+  getClusterInfo,
+  isCluster,
+  isPrimary,
+  isWorker,
+  stickySession,
+} from './cluster'
+export type { ClusterOptions, ClusterInfo, ClusterServeOptions } from './cluster'
