@@ -59,13 +59,17 @@ export const bodyLimit = (options: BodyLimitOptions = {}): Wrapper<Context> => {
   const maxSize = options.maxSize ?? DEFAULT_MAX_SIZE
   const skip = options.skip
   const onLimit = options.onLimit ?? ((_, size) =>
-    response(413, JSON.stringify({
-      error: 'Payload Too Large',
-      message: `Body exceeds ${formatSize(maxSize)} limit`,
-      received: formatSize(size),
-    }), {
-      'content-type': 'application/json',
-    })
+    response(
+      JSON.stringify({
+        error: 'Payload Too Large',
+        message: `Body exceeds ${formatSize(maxSize)} limit`,
+        received: formatSize(size),
+      }),
+      {
+        status: 413,
+        headers: { 'content-type': 'application/json' },
+      }
+    )
   )
 
   return (handler: Handler<Context>): Handler<Context> => {
