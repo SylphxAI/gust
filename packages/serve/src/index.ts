@@ -53,3 +53,7 @@ export type { Route } from './router'
 // Context
 export { createContext, withParams, parseHeaders } from './context'
 export type { Context } from './context'
+
+// Static file serving
+export { serveStatic } from './static'
+export type { StaticOptions } from './static'
