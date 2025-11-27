@@ -136,3 +136,25 @@ export {
   getClientIp,
 } from './proxy'
 export type { ProxyOptions, ProxyInfo } from './proxy'
+
+// Streaming Response
+export {
+  StreamWriter,
+  createStream,
+  createJsonStream,
+  streamFrom,
+  streamGenerator,
+  pipeStream,
+} from './stream'
+
+// Range Requests (Video/Audio)
+export {
+  parseRange,
+  isRangeSatisfiable,
+  contentRange,
+  serveRangeFile,
+  rangeServer,
+  acceptsRange,
+  getRange,
+} from './range'
+export type { Range, ParsedRange, RangeOptions, RangeFileOptions } from './range'
