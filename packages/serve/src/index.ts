@@ -61,3 +61,15 @@ export type { StaticOptions } from './static'
 // CORS
 export { cors, simpleCors } from './cors'
 export type { CorsOptions } from './cors'
+
+// Cookies
+export {
+  parseCookies,
+  serializeCookie,
+  deleteCookie,
+  getCookies,
+  getCookie,
+  setCookie,
+  setCookies,
+} from './cookie'
+export type { CookieOptions, Cookie } from './cookie'
