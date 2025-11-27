@@ -14,6 +14,10 @@ import { createContext, parseHeaders } from './context'
 const DEFAULT_KEEP_ALIVE_TIMEOUT = 5000
 // Default max requests per connection
 const DEFAULT_MAX_REQUESTS = 100
+// Default request timeout (30 seconds)
+const DEFAULT_REQUEST_TIMEOUT = 30000
+// Default header size limit (8KB)
+const DEFAULT_MAX_HEADER_SIZE = 8192
 
 export type ServeOptions = {
   readonly port?: number
@@ -23,6 +27,8 @@ export type ServeOptions = {
   readonly onError?: (error: Error) => void
   readonly keepAliveTimeout?: number
   readonly maxRequestsPerConnection?: number
+  readonly requestTimeout?: number
+  readonly maxHeaderSize?: number
 }
 
 export type Server = {
@@ -44,10 +50,18 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
   const handler = options.fetch
   const keepAliveTimeout = options.keepAliveTimeout ?? DEFAULT_KEEP_ALIVE_TIMEOUT
   const maxRequests = options.maxRequestsPerConnection ?? DEFAULT_MAX_REQUESTS
+  const requestTimeout = options.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
+  const maxHeaderSize = options.maxHeaderSize ?? DEFAULT_MAX_HEADER_SIZE
 
   return new Promise((resolve, reject) => {
     const server: NetServer = createServer((socket: Socket) => {
-      handleConnection(socket, handler, wasm, keepAliveTimeout, maxRequests, options.onError)
+      handleConnection(socket, handler, wasm, {
+        keepAliveTimeout,
+        maxRequests,
+        requestTimeout,
+        maxHeaderSize,
+        onError: options.onError,
+      })
     })
 
     server.on('error', reject)
@@ -69,12 +83,25 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
 }
 
 /**
+ * Connection config
+ */
+type ConnectionConfig = {
+  keepAliveTimeout: number
+  maxRequests: number
+  requestTimeout: number
+  maxHeaderSize: number
+  onError?: (error: Error) => void
+}
+
+/**
  * Connection state for keep-alive
  */
 type ConnectionState = {
   buffer: Buffer
   requestCount: number
   idleTimer: ReturnType<typeof setTimeout> | null
+  requestTimer: ReturnType<typeof setTimeout> | null
+  isProcessing: boolean
 }
 
 /**
@@ -84,14 +111,14 @@ const handleConnection = (
   socket: Socket,
   handler: Handler<Context>,
   wasm: WasmCore,
-  keepAliveTimeout: number,
-  maxRequests: number,
-  onError?: (error: Error) => void
+  config: ConnectionConfig
 ): void => {
   const state: ConnectionState = {
     buffer: Buffer.alloc(0),
     requestCount: 0,
     idleTimer: null,
+    requestTimer: null,
+    isProcessing: false,
   }
 
   // Reset idle timer
@@ -101,14 +128,40 @@ const handleConnection = (
     }
     state.idleTimer = setTimeout(() => {
       socket.end()
-    }, keepAliveTimeout)
+    }, config.keepAliveTimeout)
   }
 
-  // Clear timer on close
-  const clearIdleTimer = () => {
+  // Clear all timers
+  const clearTimers = () => {
     if (state.idleTimer) {
       clearTimeout(state.idleTimer)
       state.idleTimer = null
+    }
+    if (state.requestTimer) {
+      clearTimeout(state.requestTimer)
+      state.requestTimer = null
+    }
+  }
+
+  // Start request timeout
+  const startRequestTimeout = () => {
+    if (state.requestTimer) {
+      clearTimeout(state.requestTimer)
+    }
+    state.requestTimer = setTimeout(() => {
+      if (state.isProcessing) {
+        clearTimers()
+        socket.write('HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n')
+        socket.end()
+      }
+    }, config.requestTimeout)
+  }
+
+  // Clear request timeout
+  const clearRequestTimeout = () => {
+    if (state.requestTimer) {
+      clearTimeout(state.requestTimer)
+      state.requestTimer = null
     }
   }
 
@@ -120,6 +173,15 @@ const handleConnection = (
     resetIdleTimer()
 
     state.buffer = Buffer.concat([state.buffer, chunk])
+
+    // Check header size limit (before complete parse)
+    const headerEnd = state.buffer.indexOf('\r\n\r\n')
+    if (headerEnd === -1 && state.buffer.length > config.maxHeaderSize) {
+      clearTimers()
+      socket.write('HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\n\r\n')
+      socket.end()
+      return
+    }
 
     // Process all complete requests in buffer (pipelining support)
     while (state.buffer.length > 0) {
@@ -135,7 +197,7 @@ const handleConnection = (
       if (parsed.state === 2) {
         // Parse error
         parsed.free()
-        clearIdleTimer()
+        clearTimers()
         socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
         socket.end()
         return
@@ -143,6 +205,8 @@ const handleConnection = (
 
       // Complete - process request
       state.requestCount++
+      state.isProcessing = true
+      startRequestTimeout()
       const requestBuffer = state.buffer
 
       try {
@@ -157,7 +221,7 @@ const handleConnection = (
           : connectionHeader === 'keep-alive'
 
         // Check if we should close after this request
-        const shouldClose = !keepAlive || state.requestCount >= maxRequests
+        const shouldClose = !keepAlive || state.requestCount >= config.maxRequests
 
         // Calculate body end position for buffer slicing
         const requestEnd = parsed.body_start + (headers['content-length'] ? parseInt(headers['content-length'], 10) : 0)
@@ -165,10 +229,12 @@ const handleConnection = (
         parsed.free()
 
         const response = await handler(ctx)
+        clearRequestTimeout()
+        state.isProcessing = false
         sendResponse(socket, response, shouldClose)
 
         if (shouldClose) {
-          clearIdleTimer()
+          clearTimers()
           socket.end()
           return
         }
@@ -176,8 +242,8 @@ const handleConnection = (
         // Remove processed request from buffer
         state.buffer = state.buffer.subarray(requestEnd)
       } catch (error) {
-        onError?.(error as Error)
-        clearIdleTimer()
+        config.onError?.(error as Error)
+        clearTimers()
         sendResponse(socket, serverError(), true)
         socket.end()
         return
@@ -186,12 +252,12 @@ const handleConnection = (
   })
 
   socket.on('close', () => {
-    clearIdleTimer()
+    clearTimers()
   })
 
   socket.on('error', (err) => {
-    clearIdleTimer()
-    onError?.(err)
+    clearTimers()
+    config.onError?.(err)
   })
 }
 
@@ -246,9 +312,14 @@ const getStatusText = (status: number): string => {
     403: 'Forbidden',
     404: 'Not Found',
     405: 'Method Not Allowed',
+    408: 'Request Timeout',
+    413: 'Content Too Large',
+    429: 'Too Many Requests',
+    431: 'Request Header Fields Too Large',
     500: 'Internal Server Error',
     502: 'Bad Gateway',
     503: 'Service Unavailable',
+    504: 'Gateway Timeout',
   }
   return texts[status] || 'Unknown'
 }
