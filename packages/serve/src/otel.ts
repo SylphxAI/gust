@@ -509,7 +509,10 @@ const attributeKey = (attrs: SpanAttributes): string => {
  */
 export class MetricsCollector {
 	private counters = new Map<string, { value: number; attributes: SpanAttributes }[]>()
-	private histograms = new Map<string, Map<string, { values: number[]; attributes: SpanAttributes }>>()
+	private histograms = new Map<
+		string,
+		Map<string, { values: number[]; attributes: SpanAttributes }>
+	>()
 	private gauges = new Map<string, { value: number; attributes: SpanAttributes }>()
 
 	createCounter(name: string): Counter {
