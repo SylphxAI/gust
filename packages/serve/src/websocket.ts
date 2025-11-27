@@ -305,9 +305,9 @@ export type WebSocketHandler = (ws: WebSocket, headers: Record<string, string>) 
 /**
  * Create a WebSocket route handler
  */
-export const websocket = (handler: WebSocketHandler) => {
+export const websocket = (handler: WebSocketHandler): { isWebSocket: true; handler: WebSocketHandler } => {
 	return {
 		isWebSocket: true as const,
-		handler,
+		handler: handler,
 	}
 }
