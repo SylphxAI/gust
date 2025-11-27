@@ -1,0 +1,15 @@
+{
+  "name": "serve-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:wasm": "cd packages/core && bun run build:wasm",
+    "example": "bun run packages/serve/examples/basic.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}

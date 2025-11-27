@@ -1,0 +1,27 @@
+{
+  "name": "@aspect/serve",
+  "version": "0.1.0",
+  "description": "High performance functional HTTP server powered by WASM",
+  "type": "module",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "example": "bun run examples/basic.ts"
+  },
+  "keywords": [
+    "http",
+    "server",
+    "web",
+    "fast",
+    "functional",
+    "wasm"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@aspect/serve-core": "workspace:*"
+  }
+}
