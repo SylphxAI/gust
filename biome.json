@@ -2,6 +2,6 @@
 	"$schema": "https://biomejs.dev/schemas/2.3.8/schema.json",
 	"extends": ["@sylphx/biome-config"],
 	"files": {
-		"includes": ["!packages/core/src/wasm"]
+		"includes": ["!packages/core/src/wasm/**", "!.claude/**"]
 	}
 }
