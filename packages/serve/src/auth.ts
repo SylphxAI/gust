@@ -5,7 +5,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import { response } from '@sylphx/gust-core'
+import { response, unauthorized as unauthorizedResponse } from '@sylphx/gust-core'
 import type { Context } from './context'
 
 // ============================================================================
@@ -163,13 +163,7 @@ export const bearerAuth = (options: BearerAuthOptions): Wrapper<Context> => {
 	const { validate, skip, onUnauthorized, header = 'authorization', prefix = 'Bearer' } = options
 
 	const headerLower = header.toLowerCase()
-	const unauthorized =
-		onUnauthorized ??
-		(() =>
-			response(JSON.stringify({ error: 'Unauthorized' }), {
-				status: 401,
-				headers: { 'content-type': 'application/json' },
-			}))
+	const unauthorized = onUnauthorized ?? (() => unauthorizedResponse())
 
 	return (handler: Handler<Context>): Handler<Context> => {
 		return async (ctx: Context): Promise<ServerResponse> => {
@@ -217,13 +211,7 @@ export const apiKeyAuth = (options: ApiKeyOptions): Wrapper<Context> => {
 	const { validate, header = 'x-api-key', query = 'api_key', skip, onUnauthorized } = options
 
 	const headerLower = header.toLowerCase()
-	const unauthorized =
-		onUnauthorized ??
-		(() =>
-			response(JSON.stringify({ error: 'Invalid API Key' }), {
-				status: 401,
-				headers: { 'content-type': 'application/json' },
-			}))
+	const unauthorized = onUnauthorized ?? (() => unauthorizedResponse('Invalid API Key'))
 
 	return (handler: Handler<Context>): Handler<Context> => {
 		return async (ctx: Context): Promise<ServerResponse> => {
@@ -330,18 +318,12 @@ export const hmacAuth = (options: HmacOptions): Wrapper<Context> => {
 
 			const signature = ctx.headers[headerLower]
 			if (!signature) {
-				return response(JSON.stringify({ error: 'Missing signature' }), {
-					status: 401,
-					headers: { 'content-type': 'application/json' },
-				})
+				return unauthorizedResponse('Missing signature')
 			}
 
 			const isValid = verifyHmac(ctx.body, signature, secret, algorithm)
 			if (!isValid) {
-				return response(JSON.stringify({ error: 'Invalid signature' }), {
-					status: 401,
-					headers: { 'content-type': 'application/json' },
-				})
+				return unauthorizedResponse('Invalid signature')
 			}
 
 			return handler(ctx)

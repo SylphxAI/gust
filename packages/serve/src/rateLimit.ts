@@ -4,7 +4,7 @@
  */
 
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import { response } from '@sylphx/gust-core'
+import { json } from '@sylphx/gust-core'
 import type { Context } from './context'
 
 export type RateLimitOptions = {
@@ -197,10 +197,7 @@ export const rateLimit = (options: RateLimitOptions): Wrapper<Context> => {
 				// Rate limited
 				const limitedResponse = onLimitReached
 					? onLimitReached(ctx)
-					: response(JSON.stringify({ error: 'Too Many Requests' }), {
-							status: 429,
-							headers: { 'content-type': 'application/json' },
-						})
+					: json({ error: 'Too Many Requests' }, { status: 429 })
 
 				if (headers) {
 					return {
@@ -272,10 +269,7 @@ export const rateLimitWithStore = (
 			if (count > max) {
 				const limitedResponse = onLimitReached
 					? onLimitReached(ctx)
-					: response(JSON.stringify({ error: 'Too Many Requests' }), {
-							status: 429,
-							headers: { 'content-type': 'application/json' },
-						})
+					: json({ error: 'Too Many Requests' }, { status: 429 })
 
 				if (headers) {
 					return {

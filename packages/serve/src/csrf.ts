@@ -5,7 +5,7 @@
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import { response } from '@sylphx/gust-core'
+import { forbidden } from '@sylphx/gust-core'
 import type { Context } from './context'
 import { type CookieOptions, parseCookies, serializeCookie } from './cookie'
 
@@ -113,13 +113,7 @@ export const csrf = (options: CsrfOptions): Wrapper<Context> => {
 	const headerLower = header.toLowerCase()
 	const methodSet = new Set(methods.map((m) => m.toUpperCase()))
 
-	const errorResponse =
-		onError ??
-		(() =>
-			response(JSON.stringify({ error: 'Invalid CSRF token' }), {
-				status: 403,
-				headers: { 'content-type': 'application/json' },
-			}))
+	const errorResponse = onError ?? (() => forbidden('Invalid CSRF token'))
 
 	const finalCookieOptions: CookieOptions = {
 		httpOnly: true,
@@ -207,13 +201,7 @@ export const csrfDoubleSubmit = (options: Omit<CsrfOptions, 'secret'> = {}): Wra
 	const headerLower = header.toLowerCase()
 	const methodSet = new Set(methods.map((m) => m.toUpperCase()))
 
-	const errorResponse =
-		onError ??
-		(() =>
-			response(JSON.stringify({ error: 'Invalid CSRF token' }), {
-				status: 403,
-				headers: { 'content-type': 'application/json' },
-			}))
+	const errorResponse = onError ?? (() => forbidden('Invalid CSRF token'))
 
 	const finalCookieOptions: CookieOptions = {
 		httpOnly: false, // Must be readable by JavaScript

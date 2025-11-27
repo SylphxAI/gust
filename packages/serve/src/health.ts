@@ -161,10 +161,7 @@ export const health = (options: HealthOptions = {}): Handler<Context> => {
 		}
 
 		if (onUnhealthy) return onUnhealthy(result)
-		return response(JSON.stringify(result), {
-			status: 503,
-			headers: { 'content-type': 'application/json' },
-		})
+		return json(result, { status: 503 })
 	}
 }
 

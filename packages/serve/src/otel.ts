@@ -497,12 +497,19 @@ export type Gauge = {
 	set: (value: number, attributes?: SpanAttributes) => void
 }
 
+/** Generate a stable key from attributes for efficient lookup */
+const attributeKey = (attrs: SpanAttributes): string => {
+	const keys = Object.keys(attrs).sort()
+	if (keys.length === 0) return ''
+	return keys.map((k) => `${k}=${attrs[k]}`).join('&')
+}
+
 /**
  * Simple metrics collector
  */
 export class MetricsCollector {
 	private counters = new Map<string, { value: number; attributes: SpanAttributes }[]>()
-	private histograms = new Map<string, { values: number[]; attributes: SpanAttributes }[]>()
+	private histograms = new Map<string, Map<string, { values: number[]; attributes: SpanAttributes }>>()
 	private gauges = new Map<string, { value: number; attributes: SpanAttributes }>()
 
 	createCounter(name: string): Counter {
@@ -518,16 +525,17 @@ export class MetricsCollector {
 
 	createHistogram(name: string): Histogram {
 		if (!this.histograms.has(name)) {
-			this.histograms.set(name, [])
+			this.histograms.set(name, new Map())
 		}
 		return {
 			record: (value: number, attributes: SpanAttributes = {}) => {
-				const bucket = this.histograms.get(name)
-				if (!bucket) return
-				let entry = bucket.find((b) => JSON.stringify(b.attributes) === JSON.stringify(attributes))
+				const bucketMap = this.histograms.get(name)
+				if (!bucketMap) return
+				const key = attributeKey(attributes)
+				let entry = bucketMap.get(key)
 				if (!entry) {
 					entry = { values: [], attributes }
-					bucket.push(entry)
+					bucketMap.set(key, entry)
 				}
 				entry.values.push(value)
 			},
@@ -537,7 +545,7 @@ export class MetricsCollector {
 	createGauge(name: string): Gauge {
 		return {
 			set: (value: number, attributes: SpanAttributes = {}) => {
-				this.gauges.set(`${name}:${JSON.stringify(attributes)}`, { value, attributes })
+				this.gauges.set(`${name}:${attributeKey(attributes)}`, { value, attributes })
 			},
 		}
 	}
@@ -556,9 +564,9 @@ export class MetricsCollector {
 		}
 
 		// Histograms (simplified)
-		for (const [name, buckets] of this.histograms) {
+		for (const [name, bucketMap] of this.histograms) {
 			lines.push(`# TYPE ${name} histogram`)
-			for (const bucket of buckets) {
+			for (const bucket of bucketMap.values()) {
 				const count = bucket.values.length
 				const sum = bucket.values.reduce((a, b) => a + b, 0)
 				const labels = Object.entries(bucket.attributes)

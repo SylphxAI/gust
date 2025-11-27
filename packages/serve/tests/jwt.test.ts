@@ -207,7 +207,7 @@ describe('JWT', () => {
 
 			expect(result.status).toBe(401)
 			const body = JSON.parse(result.body as string)
-			expect(body.message).toBe('Missing token')
+			expect(body.error).toBe('Missing token')
 		})
 
 		it('should reject invalid token', async () => {
@@ -234,7 +234,7 @@ describe('JWT', () => {
 
 			expect(result.status).toBe(401)
 			const body = JSON.parse(result.body as string)
-			expect(body.message).toBe('Token expired')
+			expect(body.error).toBe('Token expired')
 		})
 
 		it('should store payload for context', async () => {

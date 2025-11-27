@@ -5,7 +5,7 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import { response } from '@sylphx/gust-core'
+import { unauthorized } from '@sylphx/gust-core'
 import type { Context } from './context'
 
 // ============================================================================
@@ -315,13 +315,7 @@ export const jwtAuth = (options: JwtAuthOptions): Wrapper<Context> => {
 
 	const tokenGetter = getToken ?? defaultGetToken
 
-	const errorResponse =
-		onError ??
-		((_, error) =>
-			response(JSON.stringify({ error: 'Unauthorized', message: error }), {
-				status: 401,
-				headers: { 'content-type': 'application/json' },
-			}))
+	const errorResponse = onError ?? ((_, error) => unauthorized(error))
 
 	return (handler: Handler<Context>): Handler<Context> => {
 		return async (ctx: Context): Promise<ServerResponse> => {

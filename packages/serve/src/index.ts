@@ -239,17 +239,18 @@ export {
 export type { RateLimitOptions, RateLimitStore2 } from './rateLimit'
 // Rate Limiting
 export { rateLimit, rateLimitWithStore } from './rateLimit'
-export type { Route } from './router'
+export type { Route, Routes, Router, UrlGenerator } from './router'
 // Router
 export {
 	all,
 	del,
 	get,
-	group,
 	head,
+	merge,
 	options,
 	patch,
 	post,
+	prefix,
 	put,
 	router,
 } from './router'
