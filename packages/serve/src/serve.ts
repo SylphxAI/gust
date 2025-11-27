@@ -1,10 +1,11 @@
 /**
- * Serve - High performance HTTP server
- * Uses Node.js net + WASM HTTP parser
+ * Serve - High performance HTTP/HTTPS server
+ * Uses Node.js net/tls + WASM HTTP parser
  * Runtime-agnostic: works with Bun, Node.js, Deno
  */
 
 import { createServer, type Server as NetServer, type Socket } from 'node:net'
+import { createServer as createTlsServer, type Server as TlsServer, type TLSSocket } from 'node:tls'
 import type { Context } from './context'
 import type { ServerResponse, Handler, WasmCore } from '@aspect/serve-core'
 import { initWasm, getWasm, serverError } from '@aspect/serve-core'
@@ -19,50 +20,80 @@ const DEFAULT_REQUEST_TIMEOUT = 30000
 // Default header size limit (8KB)
 const DEFAULT_MAX_HEADER_SIZE = 8192
 
+export type TlsOptions = {
+  /** TLS certificate (PEM format) */
+  readonly cert: string | Buffer
+  /** TLS private key (PEM format) */
+  readonly key: string | Buffer
+  /** CA certificate chain (optional) */
+  readonly ca?: string | Buffer | Array<string | Buffer>
+  /** Passphrase for encrypted key (optional) */
+  readonly passphrase?: string
+}
+
 export type ServeOptions = {
   readonly port?: number
   readonly hostname?: string
   readonly fetch: Handler<Context>
-  readonly onListen?: (info: { port: number; hostname: string }) => void
+  readonly onListen?: (info: { port: number; hostname: string; tls: boolean }) => void
   readonly onError?: (error: Error) => void
   readonly keepAliveTimeout?: number
   readonly maxRequestsPerConnection?: number
   readonly requestTimeout?: number
   readonly maxHeaderSize?: number
+  /** TLS configuration for HTTPS */
+  readonly tls?: TlsOptions
 }
 
 export type Server = {
   readonly port: number
   readonly hostname: string
+  readonly tls: boolean
   readonly stop: () => Promise<void>
 }
 
 /**
- * Start the HTTP server
+ * Start the HTTP/HTTPS server
  */
 export const serve = async (options: ServeOptions): Promise<Server> => {
   // Initialize WASM
   await initWasm()
   const wasm = getWasm()
 
-  const port = options.port ?? 3000
+  const port = options.port ?? (options.tls ? 443 : 3000)
   const hostname = options.hostname ?? '0.0.0.0'
   const handler = options.fetch
   const keepAliveTimeout = options.keepAliveTimeout ?? DEFAULT_KEEP_ALIVE_TIMEOUT
   const maxRequests = options.maxRequestsPerConnection ?? DEFAULT_MAX_REQUESTS
   const requestTimeout = options.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
   const maxHeaderSize = options.maxHeaderSize ?? DEFAULT_MAX_HEADER_SIZE
+  const useTls = !!options.tls
+
+  const connectionConfig: ConnectionConfig = {
+    keepAliveTimeout,
+    maxRequests,
+    requestTimeout,
+    maxHeaderSize,
+    onError: options.onError,
+  }
 
   return new Promise((resolve, reject) => {
-    const server: NetServer = createServer((socket: Socket) => {
-      handleConnection(socket, handler, wasm, {
-        keepAliveTimeout,
-        maxRequests,
-        requestTimeout,
-        maxHeaderSize,
-        onError: options.onError,
-      })
-    })
+    // Create server (HTTP or HTTPS)
+    const server: NetServer | TlsServer = useTls
+      ? createTlsServer(
+          {
+            cert: options.tls!.cert,
+            key: options.tls!.key,
+            ca: options.tls!.ca,
+            passphrase: options.tls!.passphrase,
+          },
+          (socket: TLSSocket) => {
+            handleConnection(socket, handler, wasm, connectionConfig)
+          }
+        )
+      : createServer((socket: Socket) => {
+          handleConnection(socket, handler, wasm, connectionConfig)
+        })
 
     server.on('error', reject)
 
@@ -70,13 +101,14 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
       const serverInfo: Server = {
         port,
         hostname,
+        tls: useTls,
         stop: () =>
           new Promise((res) => {
             server.close(() => res())
           }),
       }
 
-      options.onListen?.({ port, hostname })
+      options.onListen?.({ port, hostname, tls: useTls })
       resolve(serverInfo)
     })
   })
@@ -105,10 +137,10 @@ type ConnectionState = {
 }
 
 /**
- * Handle incoming TCP connection with keep-alive support
+ * Handle incoming TCP/TLS connection with keep-alive support
  */
 const handleConnection = (
-  socket: Socket,
+  socket: Socket | TLSSocket,
   handler: Handler<Context>,
   wasm: WasmCore,
   config: ConnectionConfig

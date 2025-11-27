@@ -33,7 +33,7 @@ export type {
 
 // Server
 export { serve } from './serve'
-export type { ServeOptions, Server } from './serve'
+export type { ServeOptions, Server, TlsOptions } from './serve'
 
 // Router
 export {
