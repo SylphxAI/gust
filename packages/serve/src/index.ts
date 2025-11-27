@@ -77,3 +77,14 @@ export type { CookieOptions, Cookie } from './cookie'
 // Compression
 export { compress, gzip, brotli } from './compress'
 export type { CompressionOptions } from './compress'
+
+// WebSocket
+export {
+  WebSocket,
+  isWebSocketUpgrade,
+  upgradeToWebSocket,
+  generateAcceptKey,
+  createHandshakeResponse,
+  websocket,
+} from './websocket'
+export type { WebSocketMessage, WebSocketEvents, WebSocketHandler } from './websocket'
