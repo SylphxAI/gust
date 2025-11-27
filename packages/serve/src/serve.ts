@@ -10,12 +10,19 @@ import type { ServerResponse, Handler, WasmCore } from '@aspect/serve-core'
 import { initWasm, getWasm, serverError } from '@aspect/serve-core'
 import { createContext, parseHeaders } from './context'
 
+// Default keep-alive timeout (5 seconds)
+const DEFAULT_KEEP_ALIVE_TIMEOUT = 5000
+// Default max requests per connection
+const DEFAULT_MAX_REQUESTS = 100
+
 export type ServeOptions = {
   readonly port?: number
   readonly hostname?: string
   readonly fetch: Handler<Context>
   readonly onListen?: (info: { port: number; hostname: string }) => void
   readonly onError?: (error: Error) => void
+  readonly keepAliveTimeout?: number
+  readonly maxRequestsPerConnection?: number
 }
 
 export type Server = {
@@ -35,10 +42,12 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
   const port = options.port ?? 3000
   const hostname = options.hostname ?? '0.0.0.0'
   const handler = options.fetch
+  const keepAliveTimeout = options.keepAliveTimeout ?? DEFAULT_KEEP_ALIVE_TIMEOUT
+  const maxRequests = options.maxRequestsPerConnection ?? DEFAULT_MAX_REQUESTS
 
   return new Promise((resolve, reject) => {
     const server: NetServer = createServer((socket: Socket) => {
-      handleConnection(socket, handler, wasm, options.onError)
+      handleConnection(socket, handler, wasm, keepAliveTimeout, maxRequests, options.onError)
     })
 
     server.on('error', reject)
@@ -60,62 +69,136 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
 }
 
 /**
- * Handle incoming TCP connection
+ * Connection state for keep-alive
+ */
+type ConnectionState = {
+  buffer: Buffer
+  requestCount: number
+  idleTimer: ReturnType<typeof setTimeout> | null
+}
+
+/**
+ * Handle incoming TCP connection with keep-alive support
  */
 const handleConnection = (
   socket: Socket,
   handler: Handler<Context>,
   wasm: WasmCore,
+  keepAliveTimeout: number,
+  maxRequests: number,
   onError?: (error: Error) => void
 ): void => {
-  let buffer = Buffer.alloc(0)
+  const state: ConnectionState = {
+    buffer: Buffer.alloc(0),
+    requestCount: 0,
+    idleTimer: null,
+  }
+
+  // Reset idle timer
+  const resetIdleTimer = () => {
+    if (state.idleTimer) {
+      clearTimeout(state.idleTimer)
+    }
+    state.idleTimer = setTimeout(() => {
+      socket.end()
+    }, keepAliveTimeout)
+  }
+
+  // Clear timer on close
+  const clearIdleTimer = () => {
+    if (state.idleTimer) {
+      clearTimeout(state.idleTimer)
+      state.idleTimer = null
+    }
+  }
+
+  // Start idle timer
+  resetIdleTimer()
 
   socket.on('data', async (chunk: Buffer) => {
-    buffer = Buffer.concat([buffer, chunk])
+    // Reset idle timer on data
+    resetIdleTimer()
 
-    // Try to parse HTTP request
-    const parsed = wasm.parse_http(new Uint8Array(buffer))
+    state.buffer = Buffer.concat([state.buffer, chunk])
 
-    if (parsed.state === 0) {
-      // Incomplete - wait for more data
-      parsed.free()
-      return
+    // Process all complete requests in buffer (pipelining support)
+    while (state.buffer.length > 0) {
+      // Try to parse HTTP request
+      const parsed = wasm.parse_http(new Uint8Array(state.buffer))
+
+      if (parsed.state === 0) {
+        // Incomplete - wait for more data
+        parsed.free()
+        return
+      }
+
+      if (parsed.state === 2) {
+        // Parse error
+        parsed.free()
+        clearIdleTimer()
+        socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
+        socket.end()
+        return
+      }
+
+      // Complete - process request
+      state.requestCount++
+      const requestBuffer = state.buffer
+
+      try {
+        const headers = parseHeaders(requestBuffer, parsed.header_offsets, parsed.headers_count)
+        const ctx = createContext(socket, requestBuffer, parsed, headers)
+
+        // Determine if keep-alive
+        const connectionHeader = headers['connection']?.toLowerCase() || ''
+        const isHttp11 = true // We assume HTTP/1.1
+        const keepAlive = isHttp11
+          ? connectionHeader !== 'close'
+          : connectionHeader === 'keep-alive'
+
+        // Check if we should close after this request
+        const shouldClose = !keepAlive || state.requestCount >= maxRequests
+
+        // Calculate body end position for buffer slicing
+        const requestEnd = parsed.body_start + (headers['content-length'] ? parseInt(headers['content-length'], 10) : 0)
+
+        parsed.free()
+
+        const response = await handler(ctx)
+        sendResponse(socket, response, shouldClose)
+
+        if (shouldClose) {
+          clearIdleTimer()
+          socket.end()
+          return
+        }
+
+        // Remove processed request from buffer
+        state.buffer = state.buffer.subarray(requestEnd)
+      } catch (error) {
+        onError?.(error as Error)
+        clearIdleTimer()
+        sendResponse(socket, serverError(), true)
+        socket.end()
+        return
+      }
     }
+  })
 
-    if (parsed.state === 2) {
-      // Parse error
-      parsed.free()
-      socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-      socket.end()
-      return
-    }
-
-    // Complete - process request
-    try {
-      const headers = parseHeaders(buffer, parsed.header_offsets, parsed.headers_count)
-      const ctx = createContext(socket, buffer, parsed, headers)
-      parsed.free()
-
-      const response = await handler(ctx)
-      sendResponse(socket, response)
-    } catch (error) {
-      onError?.(error as Error)
-      sendResponse(socket, serverError())
-    }
-
-    // Reset buffer for keep-alive
-    buffer = Buffer.alloc(0)
+  socket.on('close', () => {
+    clearIdleTimer()
   })
 
   socket.on('error', (err) => {
+    clearIdleTimer()
     onError?.(err)
   })
 }
 
 /**
- * Send HTTP response
+ * Send HTTP response with optional keep-alive
  */
-const sendResponse = (socket: Socket, response: ServerResponse): void => {
+const sendResponse = (socket: Socket, response: ServerResponse, shouldClose: boolean): void => {
   const statusText = getStatusText(response.status)
   let head = `HTTP/1.1 ${response.status} ${statusText}\r\n`
 
@@ -128,7 +211,12 @@ const sendResponse = (socket: Socket, response: ServerResponse): void => {
   if (response.body !== null) {
     const bodyLen = Buffer.byteLength(response.body)
     head += `content-length: ${bodyLen}\r\n`
+  } else {
+    head += 'content-length: 0\r\n'
   }
+
+  // Add Connection header
+  head += `connection: ${shouldClose ? 'close' : 'keep-alive'}\r\n`
 
   head += '\r\n'
 
@@ -137,9 +225,6 @@ const sendResponse = (socket: Socket, response: ServerResponse): void => {
   if (response.body !== null) {
     socket.write(response.body)
   }
-
-  // For now, close connection (no keep-alive)
-  socket.end()
 }
 
 /**
