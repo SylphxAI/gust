@@ -184,17 +184,17 @@ export const serveRangeFile = async (
   // Check conditional headers
   const ifNoneMatch = ctx.headers['if-none-match']
   if (ifNoneMatch === etag) {
-    return response(304, '', {
-      etag,
-      'last-modified': lastModified,
+    return response('', {
+      status: 304,
+      headers: { etag, 'last-modified': lastModified },
     })
   }
 
   const ifModifiedSince = ctx.headers['if-modified-since']
   if (ifModifiedSince && new Date(ifModifiedSince) >= stats.mtime) {
-    return response(304, '', {
-      etag,
-      'last-modified': lastModified,
+    return response('', {
+      status: 304,
+      headers: { etag, 'last-modified': lastModified },
     })
   }
 
@@ -221,8 +221,9 @@ export const serveRangeFile = async (
 
   if (!parsed || parsed.ranges.length === 0) {
     // Invalid range
-    return response(416, 'Range Not Satisfiable', {
-      'content-range': `bytes */${fileSize}`,
+    return response('Range Not Satisfiable', {
+      status: 416,
+      headers: { 'content-range': `bytes */${fileSize}` },
     })
   }
 
@@ -336,7 +337,7 @@ export const rangeServer = (options: RangeOptions) => {
 
     // Security: prevent directory traversal
     if (path.includes('..')) {
-      return response(400, 'Bad Request')
+      return response('Bad Request', { status: 400 })
     }
 
     // Check extension

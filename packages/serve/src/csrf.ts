@@ -113,8 +113,9 @@ export const csrf = (options: CsrfOptions): Wrapper<Context> => {
   const methodSet = new Set(methods.map((m) => m.toUpperCase()))
 
   const errorResponse = onError ?? (() =>
-    response(403, JSON.stringify({ error: 'Invalid CSRF token' }), {
-      'content-type': 'application/json',
+    response(JSON.stringify({ error: 'Invalid CSRF token' }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
     })
   )
 
@@ -205,8 +206,9 @@ export const csrfDoubleSubmit = (options: Omit<CsrfOptions, 'secret'> = {}): Wra
   const methodSet = new Set(methods.map((m) => m.toUpperCase()))
 
   const errorResponse = onError ?? (() =>
-    response(403, JSON.stringify({ error: 'Invalid CSRF token' }), {
-      'content-type': 'application/json',
+    response(JSON.stringify({ error: 'Invalid CSRF token' }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
     })
   )
 

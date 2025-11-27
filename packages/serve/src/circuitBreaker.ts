@@ -236,12 +236,15 @@ export const circuitBreaker = (options: CircuitBreakerOptions = {}): Wrapper<Con
   }
 
   const defaultFallback = (): ServerResponse =>
-    response(503, JSON.stringify({
+    response(JSON.stringify({
       error: 'Service Unavailable',
       message: 'Circuit breaker is open',
     }), {
-      'content-type': 'application/json',
-      'retry-after': String(Math.ceil((options.resetTimeout ?? 30000) / 1000)),
+      status: 503,
+      headers: {
+        'content-type': 'application/json',
+        'retry-after': String(Math.ceil((options.resetTimeout ?? 30000) / 1000)),
+      },
     })
 
   return (handler: Handler<Context>): Handler<Context> => {
@@ -278,11 +281,12 @@ export const circuitBreaker = (options: CircuitBreakerOptions = {}): Wrapper<Con
           return fallback(ctx, error as Error)
         }
 
-        return response(503, JSON.stringify({
+        return response(JSON.stringify({
           error: 'Service Unavailable',
           message: (error as Error).message,
         }), {
-          'content-type': 'application/json',
+          status: 503,
+          headers: { 'content-type': 'application/json' },
         })
       }
     }
@@ -362,12 +366,15 @@ export const bulkhead = (options: BulkheadOptions = {}): Wrapper<Context> => {
   }> = []
 
   const rejectResponse = onReject ?? (() =>
-    response(503, JSON.stringify({
+    response(JSON.stringify({
       error: 'Service Unavailable',
       message: 'Too many concurrent requests',
     }), {
-      'content-type': 'application/json',
-      'retry-after': '5',
+      status: 503,
+      headers: {
+        'content-type': 'application/json',
+        'retry-after': '5',
+      },
     })
   )
 

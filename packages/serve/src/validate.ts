@@ -369,11 +369,12 @@ export const validate = (options: ValidateOptions): Wrapper<Context> => {
   const { body: bodySchema, query: querySchema, params: paramsSchema, onError } = options
 
   const errorResponse = onError ?? ((errors) =>
-    response(400, JSON.stringify({
+    response(JSON.stringify({
       error: 'Validation Error',
       details: errors,
     }), {
-      'content-type': 'application/json',
+      status: 400,
+      headers: { 'content-type': 'application/json' },
     })
   )
 

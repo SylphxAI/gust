@@ -140,11 +140,12 @@ export const health = (options: HealthOptions = {}): Handler<Context> => {
     // Simple response without details
     if (!detailed) {
       const statusCode = result.status === 'healthy' ? 200 : 503
-      return response(statusCode, JSON.stringify({
+      return response(JSON.stringify({
         status: result.status,
         timestamp: result.timestamp,
       }), {
-        'content-type': 'application/json',
+        status: statusCode,
+        headers: { 'content-type': 'application/json' },
       })
     }
 
@@ -154,8 +155,9 @@ export const health = (options: HealthOptions = {}): Handler<Context> => {
     }
 
     if (onUnhealthy) return onUnhealthy(result)
-    return response(503, JSON.stringify(result), {
-      'content-type': 'application/json',
+    return response(JSON.stringify(result), {
+      status: 503,
+      headers: { 'content-type': 'application/json' },
     })
   }
 }
@@ -166,7 +168,7 @@ export const health = (options: HealthOptions = {}): Handler<Context> => {
  */
 export const liveness = (): Handler<Context> => {
   return async (): Promise<ServerResponse> => {
-    return response(200, 'OK', { 'content-type': 'text/plain' })
+    return response('OK', { status: 200, headers: { 'content-type': 'text/plain' } })
   }
 }
 
@@ -177,14 +179,15 @@ export const liveness = (): Handler<Context> => {
 export const readiness = (checks: HealthCheck[] = []): Handler<Context> => {
   return async (): Promise<ServerResponse> => {
     if (checks.length === 0) {
-      return response(200, 'Ready', { 'content-type': 'text/plain' })
+      return response('Ready', { status: 200, headers: { 'content-type': 'text/plain' } })
     }
 
     const result = await runHealthChecks(checks)
     const statusCode = result.status === 'healthy' ? 200 : 503
 
-    return response(statusCode, result.status === 'healthy' ? 'Ready' : 'Not Ready', {
-      'content-type': 'text/plain',
+    return response(result.status === 'healthy' ? 'Ready' : 'Not Ready', {
+      status: statusCode,
+      headers: { 'content-type': 'text/plain' },
     })
   }
 }
@@ -196,8 +199,9 @@ export const readiness = (checks: HealthCheck[] = []): Handler<Context> => {
 export const startup = (isReady: () => boolean | Promise<boolean>): Handler<Context> => {
   return async (): Promise<ServerResponse> => {
     const ready = await isReady()
-    return response(ready ? 200 : 503, ready ? 'Started' : 'Starting', {
-      'content-type': 'text/plain',
+    return response(ready ? 'Started' : 'Starting', {
+      status: ready ? 200 : 503,
+      headers: { 'content-type': 'text/plain' },
     })
   }
 }
@@ -347,8 +351,9 @@ export const prometheusMetrics = (prefix = 'app'): Handler<Context> => {
       `${prefix}_cpu_system_microseconds ${m.cpu.system}`,
     ]
 
-    return response(200, lines.join('\n'), {
-      'content-type': 'text/plain; version=0.0.4',
+    return response(lines.join('\n'), {
+      status: 200,
+      headers: { 'content-type': 'text/plain; version=0.0.4' },
     })
   }
 }

@@ -61,9 +61,12 @@ export const basicAuth = (options: BasicAuthOptions): Wrapper<Context> => {
   const { validate, realm = 'Secure Area', skip, onUnauthorized } = options
 
   const unauthorized = onUnauthorized ?? (() =>
-    response(401, 'Unauthorized', {
-      'www-authenticate': `Basic realm="${realm}"`,
-      'content-type': 'text/plain',
+    response('Unauthorized', {
+      status: 401,
+      headers: {
+        'www-authenticate': `Basic realm="${realm}"`,
+        'content-type': 'text/plain',
+      },
     })
   )
 
@@ -162,8 +165,9 @@ export const bearerAuth = (options: BearerAuthOptions): Wrapper<Context> => {
 
   const headerLower = header.toLowerCase()
   const unauthorized = onUnauthorized ?? (() =>
-    response(401, JSON.stringify({ error: 'Unauthorized' }), {
-      'content-type': 'application/json',
+    response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
     })
   )
 
@@ -220,8 +224,9 @@ export const apiKeyAuth = (options: ApiKeyOptions): Wrapper<Context> => {
 
   const headerLower = header.toLowerCase()
   const unauthorized = onUnauthorized ?? (() =>
-    response(401, JSON.stringify({ error: 'Invalid API Key' }), {
-      'content-type': 'application/json',
+    response(JSON.stringify({ error: 'Invalid API Key' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
     })
   )
 
@@ -335,15 +340,17 @@ export const hmacAuth = (options: HmacOptions): Wrapper<Context> => {
 
       const signature = ctx.headers[headerLower]
       if (!signature) {
-        return response(401, JSON.stringify({ error: 'Missing signature' }), {
-          'content-type': 'application/json',
+        return response(JSON.stringify({ error: 'Missing signature' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
         })
       }
 
       const isValid = verifyHmac(ctx.body, signature, secret, algorithm)
       if (!isValid) {
-        return response(401, JSON.stringify({ error: 'Invalid signature' }), {
-          'content-type': 'application/json',
+        return response(JSON.stringify({ error: 'Invalid signature' }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
         })
       }
 
