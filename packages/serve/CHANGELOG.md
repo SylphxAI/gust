@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 (2025-11-27)
+
+### 🐛 Bug Fixes
+
+- **build:** disable code splitting to fix duplicate exports ([ab72899](https://github.com/SylphxAI/gust/commit/ab728993f5158abe0eb65f40d828ee4b906127b2))
+
 ## 0.1.2 (2025-11-27)
 
 ### 🐛 Bug Fixes
