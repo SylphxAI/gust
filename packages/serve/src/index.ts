@@ -73,3 +73,7 @@ export {
   setCookies,
 } from './cookie'
 export type { CookieOptions, Cookie } from './cookie'
+
+// Compression
+export { compress, gzip, brotli } from './compress'
+export type { CompressionOptions } from './compress'
