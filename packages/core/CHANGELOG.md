@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6 (2025-11-28)
+
+### ✨ Features
+
+- **streaming:** add AsyncIterable-based streaming support ([b52a96f](https://github.com/SylphxAI/gust/commit/b52a96fecdd4a905a7b0c11d62f964d2046c117a))
+
 ## 0.1.5 (2025-11-28)
 
 ### ✨ Features
