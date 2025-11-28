@@ -37,9 +37,14 @@ const user = get('/users/:id', (ctx) => json({ id: ctx.params.id }))
 
 const app = router({ home, user })
 
-// Type-safe URL generation
-app.url.home()           // "/"
-app.url.user({ id: 42 }) // "/users/42"
+// Type-safe URL generation (routes are callable)
+app.home()           // "/"
+app.user({ id: 42 }) // "/users/42"
+
+// Route properties
+app.home.path        // "/"
+app.home.method      // "GET"
+app.user.path        // "/users/:id"
 
 serve({ port: 3000, fetch: app.handler })
 ```
@@ -367,19 +372,36 @@ const user = get('/users/:id', (ctx) => {
   return json({ id: ctx.params.id })
 })
 
-const post = get('/users/:userId/posts/:postId', (ctx) => {
+const postRoute = get('/users/:userId/posts/:postId', (ctx) => {
   ctx.params.userId  // string
   ctx.params.postId  // string
   return json(ctx.params)
 })
 
 // Named routes with URL generation
-const app = router({ user, post })
-app.url.user({ id: 42 })                    // "/users/42"
-app.url.post({ userId: 1, postId: 99 })     // "/users/1/posts/99"
+const app = router({ user, post: postRoute })
+app.user({ id: 42 })                    // "/users/42"
+app.post({ userId: 1, postId: 99 })     // "/users/1/posts/99"
+
+// Route properties
+app.user.path                           // "/users/:id"
+app.user.method                         // "GET"
+
+// Nested routers
+const member = router({
+  home: get('/', () => text('member home')),
+  profile: get('/profile', () => text('profile')),
+})
+const mainApp = router({
+  login: get('/login', () => text('login')),
+  member,
+})
+mainApp.login()             // "/login"
+mainApp.member.home()       // "/"
+mainApp.member.profile()    // "/profile"
 
 // Route composition
-const apiRoutes = prefix('/api', { user, post })
+const apiRoutes = prefix('/api', { user, post: postRoute })
 const allRoutes = merge(apiRoutes, otherRoutes)
 ```
 

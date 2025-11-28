@@ -66,8 +66,8 @@ describe('Router', () => {
 				users: get('/users', () => text('ok')),
 			})
 
-			expect(api.routes.health.path).toBe('/api/health')
-			expect(api.routes.users.path).toBe('/api/users')
+			expect(api.health.path).toBe('/api/health')
+			expect(api.users.path).toBe('/api/users')
 		})
 
 		it('should generate prefixed URLs', () => {
@@ -76,24 +76,8 @@ describe('Router', () => {
 				user: get('/users/:id', () => text('ok')),
 			})
 
-			expect(api.url.health()).toBe('/api/health')
-			expect(api.url.user({ id: 42 })).toBe('/api/users/42')
-		})
-
-		it('should compose with spread', () => {
-			const api = router('/api', {
-				health: get('/health', () => text('ok')),
-			})
-
-			const app = router({
-				home: get('/', () => text('home')),
-				...api.routes,
-			})
-
-			expect(app.routes.home.path).toBe('/')
-			expect(app.routes.health.path).toBe('/api/health')
-			expect(app.url.home()).toBe('/')
-			expect(app.url.health()).toBe('/api/health')
+			expect(api.health()).toBe('/api/health')
+			expect(api.user({ id: 42 })).toBe('/api/users/42')
 		})
 
 		it('should work without prefix', () => {
@@ -101,8 +85,8 @@ describe('Router', () => {
 				health: get('/health', () => text('ok')),
 			})
 
-			expect(app.routes.health.path).toBe('/health')
-			expect(app.url.health()).toBe('/health')
+			expect(app.health.path).toBe('/health')
+			expect(app.health()).toBe('/health')
 		})
 	})
 
@@ -115,10 +99,10 @@ describe('Router', () => {
 			const login = get('/login', () => text('login'))
 			const app = router({ login, member })
 
-			// Structure is preserved
-			expect(app.routes.login.path).toBe('/login')
-			expect(app.routes.member.routes.home.path).toBe('/')
-			expect(app.routes.member.routes.help.path).toBe('/help')
+			// Structure is preserved - accessors follow nested structure
+			expect(app.login.path).toBe('/login')
+			expect(app.member.home.path).toBe('/')
+			expect(app.member.help.path).toBe('/help')
 		})
 
 		it('should generate URLs preserving structure', () => {
@@ -129,10 +113,10 @@ describe('Router', () => {
 			const login = get('/login', () => text('login'))
 			const app = router({ login, member })
 
-			// URL generators follow structure
-			expect(app.url.login()).toBe('/login')
-			expect(app.url.member.home()).toBe('/')
-			expect(app.url.member.help()).toBe('/help')
+			// URL generators follow structure (callable)
+			expect(app.login()).toBe('/login')
+			expect(app.member.home()).toBe('/')
+			expect(app.member.help()).toBe('/help')
 		})
 
 		it('should work with prefixed nested routers', () => {
@@ -143,13 +127,13 @@ describe('Router', () => {
 			const home = get('/', () => text('home'))
 			const app = router({ home, api })
 
-			expect(app.routes.home.path).toBe('/')
-			expect(app.routes.api.routes.health.path).toBe('/api/health')
-			expect(app.routes.api.routes.users.path).toBe('/api/users')
+			expect(app.home.path).toBe('/')
+			expect(app.api.health.path).toBe('/api/health')
+			expect(app.api.users.path).toBe('/api/users')
 
-			expect(app.url.home()).toBe('/')
-			expect(app.url.api.health()).toBe('/api/health')
-			expect(app.url.api.users()).toBe('/api/users')
+			expect(app.home()).toBe('/')
+			expect(app.api.health()).toBe('/api/health')
+			expect(app.api.users()).toBe('/api/users')
 		})
 
 		it('should work with multiple nested routers', () => {
@@ -162,12 +146,12 @@ describe('Router', () => {
 			const home = get('/', () => text('home'))
 			const app = router({ home, api, auth })
 
-			expect(app.routes.home.path).toBe('/')
-			expect(app.routes.api.routes.health.path).toBe('/api/health')
-			expect(app.routes.auth.routes.login.path).toBe('/auth/login')
+			expect(app.home.path).toBe('/')
+			expect(app.api.health.path).toBe('/api/health')
+			expect(app.auth.login.path).toBe('/auth/login')
 
-			expect(app.url.api.health()).toBe('/api/health')
-			expect(app.url.auth.login()).toBe('/auth/login')
+			expect(app.api.health()).toBe('/api/health')
+			expect(app.auth.login()).toBe('/auth/login')
 		})
 
 		it('should deeply nest routers', () => {
@@ -180,12 +164,12 @@ describe('Router', () => {
 			const home = get('/', () => text('home'))
 			const app = router({ home, middle })
 
-			expect(app.routes.home.path).toBe('/')
-			expect(app.routes.middle.routes.list.path).toBe('/mid/list')
-			expect(app.routes.middle.routes.inner.routes.item.path).toBe('/mid/item')
+			expect(app.home.path).toBe('/')
+			expect(app.middle.list.path).toBe('/mid/list')
+			expect(app.middle.inner.item.path).toBe('/mid/item')
 
-			expect(app.url.middle.list()).toBe('/mid/list')
-			expect(app.url.middle.inner.item()).toBe('/mid/item')
+			expect(app.middle.list()).toBe('/mid/list')
+			expect(app.middle.inner.item()).toBe('/mid/item')
 		})
 	})
 
@@ -490,19 +474,21 @@ describe('Router', () => {
 			const app = router({ home, about })
 
 			expect(app).toHaveProperty('handler')
-			expect(app).toHaveProperty('routes')
-			expect(app).toHaveProperty('url')
+			expect(app).toHaveProperty('_isRouter')
 			expect(typeof app.handler).toBe('function')
 		})
 
-		it('should expose routes object', () => {
+		it('should expose route accessors directly', () => {
 			const home = get('/', () => text('home'))
 			const users = get('/users', () => text('users'))
 
 			const app = router({ home, users })
 
-			expect(app.routes.home).toBe(home)
-			expect(app.routes.users).toBe(users)
+			// Each route is accessible directly on the router
+			expect(app.home.path).toBe('/')
+			expect(app.home.method).toBe('GET')
+			expect(app.users.path).toBe('/users')
+			expect(app.users.method).toBe('GET')
 		})
 
 		it('should generate URLs for static routes', () => {
@@ -511,25 +497,26 @@ describe('Router', () => {
 
 			const app = router({ home, about })
 
-			expect(app.url.home()).toBe('/')
-			expect(app.url.about()).toBe('/about')
+			// Routes are callable for URL generation
+			expect(app.home()).toBe('/')
+			expect(app.about()).toBe('/about')
 		})
 
 		it('should generate URLs with params', () => {
 			const user = get('/users/:id', () => text('user'))
-			const post = get('/users/:userId/posts/:postId', () => text('post'))
+			const postRoute = get('/users/:userId/posts/:postId', () => text('post'))
 
-			const app = router({ user, post })
+			const app = router({ user, post: postRoute })
 
-			expect(app.url.user({ id: 42 })).toBe('/users/42')
-			expect(app.url.post({ userId: 1, postId: 99 })).toBe('/users/1/posts/99')
+			expect(app.user({ id: 42 })).toBe('/users/42')
+			expect(app.post({ userId: 1, postId: 99 })).toBe('/users/1/posts/99')
 		})
 
 		it('should throw on missing URL params', () => {
 			const user = get('/users/:id', () => text('user'))
 			const app = router({ user })
 
-			expect(() => app.url.user({})).toThrow('Missing param: id')
+			expect(() => app.user({})).toThrow('Missing param: id')
 		})
 
 		it('should handle mixed static and param routes', () => {
@@ -539,9 +526,9 @@ describe('Router', () => {
 
 			const app = router({ home, user, settings })
 
-			expect(app.url.home()).toBe('/')
-			expect(app.url.user({ id: 'abc' })).toBe('/users/abc')
-			expect(app.url.settings()).toBe('/settings')
+			expect(app.home()).toBe('/')
+			expect(app.user({ id: 'abc' })).toBe('/users/abc')
+			expect(app.settings()).toBe('/settings')
 		})
 	})
 
