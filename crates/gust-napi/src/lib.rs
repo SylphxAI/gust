@@ -14,6 +14,10 @@
 use bytes::Bytes;
 use gust_core::{
     Method, Request, Response, ResponseBuilder, Router, StatusCode,
+    // WebSocket support from core
+    WebSocketFrame as CoreFrame, WebSocketOpcode as CoreOpcode,
+    generate_accept_key as core_generate_accept_key,
+    // Middleware
     middleware::{
         MiddlewareChain,
         circuit_breaker::{CircuitBreaker as RustCircuitBreaker, CircuitBreakerConfig as RustCBConfig, Bulkhead as RustBulkhead, BulkheadConfig as RustBulkheadConfig, CircuitState as RustCircuitState},
@@ -2118,118 +2122,10 @@ pub fn is_websocket_upgrade(headers: HashMap<String, String>) -> bool {
 }
 
 /// Generate WebSocket accept key from client key
+/// Uses gust_core::generate_accept_key internally
 #[napi]
 pub fn generate_websocket_accept(key: String) -> String {
-    // WebSocket GUID as per RFC 6455
-    const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-
-    // Concatenate key with GUID
-    let concat = format!("{}{}", key, WS_GUID);
-
-    // SHA-1 hash
-    let hash = sha1_hash(concat.as_bytes());
-
-    // Base64 encode
-    base64_encode(&hash)
-}
-
-/// Simple SHA-1 implementation for WebSocket accept key
-fn sha1_hash(data: &[u8]) -> [u8; 20] {
-    // SHA-1 constants
-    const K: [u32; 4] = [0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6];
-
-    let mut h: [u32; 5] = [
-        0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0
-    ];
-
-    // Pad message
-    let ml = (data.len() * 8) as u64;
-    let mut padded = data.to_vec();
-    padded.push(0x80);
-    while (padded.len() % 64) != 56 {
-        padded.push(0);
-    }
-    padded.extend_from_slice(&ml.to_be_bytes());
-
-    // Process 512-bit chunks
-    for chunk in padded.chunks(64) {
-        let mut w = [0u32; 80];
-        for (i, bytes) in chunk.chunks(4).enumerate() {
-            w[i] = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16]).rotate_left(1);
-        }
-
-        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
-
-        for i in 0..80 {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), K[0]),
-                20..=39 => (b ^ c ^ d, K[1]),
-                40..=59 => ((b & c) | (b & d) | (c & d), K[2]),
-                _ => (b ^ c ^ d, K[3]),
-            };
-
-            let temp = a.rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(w[i]);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        h[0] = h[0].wrapping_add(a);
-        h[1] = h[1].wrapping_add(b);
-        h[2] = h[2].wrapping_add(c);
-        h[3] = h[3].wrapping_add(d);
-        h[4] = h[4].wrapping_add(e);
-    }
-
-    let mut result = [0u8; 20];
-    for (i, val) in h.iter().enumerate() {
-        result[i*4..i*4+4].copy_from_slice(&val.to_be_bytes());
-    }
-    result
-}
-
-/// Base64 encode
-fn base64_encode(data: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut result = String::new();
-    let mut i = 0;
-
-    while i < data.len() {
-        let b0 = data[i] as u32;
-        let b1 = if i + 1 < data.len() { data[i + 1] as u32 } else { 0 };
-        let b2 = if i + 2 < data.len() { data[i + 2] as u32 } else { 0 };
-
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-
-        result.push(ALPHABET[(triple >> 18) as usize & 63] as char);
-        result.push(ALPHABET[(triple >> 12) as usize & 63] as char);
-
-        if i + 1 < data.len() {
-            result.push(ALPHABET[(triple >> 6) as usize & 63] as char);
-        } else {
-            result.push('=');
-        }
-
-        if i + 2 < data.len() {
-            result.push(ALPHABET[triple as usize & 63] as char);
-        } else {
-            result.push('=');
-        }
-
-        i += 3;
-    }
-
-    result
+    core_generate_accept_key(&key)
 }
 
 /// WebSocket upgrade response headers
@@ -2261,9 +2157,10 @@ pub fn create_websocket_upgrade_response(key: String, protocol: Option<String>) 
 
 // ============================================================================
 // WebSocket Frame Encoding/Decoding (RFC 6455)
+// Uses gust_core::WebSocketFrame (CoreFrame) internally
 // ============================================================================
 
-/// WebSocket frame opcode
+/// WebSocket frame opcode (for JavaScript consumption)
 #[napi(string_enum)]
 #[derive(PartialEq)]
 pub enum WebSocketOpcode {
@@ -2281,28 +2178,15 @@ pub enum WebSocketOpcode {
     Pong,
 }
 
-impl WebSocketOpcode {
-    fn from_u8(opcode: u8) -> Option<Self> {
-        match opcode {
-            0x0 => Some(WebSocketOpcode::Continuation),
-            0x1 => Some(WebSocketOpcode::Text),
-            0x2 => Some(WebSocketOpcode::Binary),
-            0x8 => Some(WebSocketOpcode::Close),
-            0x9 => Some(WebSocketOpcode::Ping),
-            0xA => Some(WebSocketOpcode::Pong),
-            _ => None,
-        }
-    }
-
-    fn to_u8(&self) -> u8 {
-        match self {
-            WebSocketOpcode::Continuation => 0x0,
-            WebSocketOpcode::Text => 0x1,
-            WebSocketOpcode::Binary => 0x2,
-            WebSocketOpcode::Close => 0x8,
-            WebSocketOpcode::Ping => 0x9,
-            WebSocketOpcode::Pong => 0xA,
-        }
+// Convert between NAPI enum and core enum
+fn core_opcode_to_string(opcode: CoreOpcode) -> &'static str {
+    match opcode {
+        CoreOpcode::Continuation => "continuation",
+        CoreOpcode::Text => "text",
+        CoreOpcode::Binary => "binary",
+        CoreOpcode::Close => "close",
+        CoreOpcode::Ping => "ping",
+        CoreOpcode::Pong => "pong",
     }
 }
 
@@ -2336,217 +2220,119 @@ pub struct WebSocketParseResult {
 }
 
 /// Parse a WebSocket frame from raw bytes
-///
-/// Handles frame decoding according to RFC 6455:
-/// - Reads FIN, opcode, mask, payload length
-/// - Unmasks payload data (client->server frames are always masked)
-/// - Handles extended payload lengths (16-bit and 64-bit)
-///
-/// Returns WebSocketParseResult with frame data or error
+/// Uses gust_core::WebSocketFrame::decode() internally
 #[napi]
 pub fn parse_websocket_frame(data: Vec<u8>) -> WebSocketParseResult {
-    if data.len() < 2 {
-        return WebSocketParseResult {
-            frame: None,
-            error: None,
-            incomplete: true,
-        };
-    }
+    match CoreFrame::decode(&data) {
+        Some((frame, bytes_consumed)) => {
+            let opcode_str = core_opcode_to_string(frame.opcode);
 
-    // First byte: FIN (1 bit), RSV1-3 (3 bits), Opcode (4 bits)
-    let fin = (data[0] & 0x80) != 0;
-    let opcode_raw = data[0] & 0x0F;
+            // Parse close code and reason for close frames
+            let (close_code, close_reason) = if frame.opcode == CoreOpcode::Close && frame.payload.len() >= 2 {
+                let code = u16::from_be_bytes([frame.payload[0], frame.payload[1]]) as u32;
+                let reason = if frame.payload.len() > 2 {
+                    String::from_utf8(frame.payload[2..].to_vec()).ok()
+                } else {
+                    None
+                };
+                (Some(code), reason)
+            } else {
+                (None, None)
+            };
 
-    let opcode = match WebSocketOpcode::from_u8(opcode_raw) {
-        Some(op) => op,
-        None => {
-            return WebSocketParseResult {
-                frame: None,
-                error: Some(format!("Invalid opcode: {}", opcode_raw)),
+            WebSocketParseResult {
+                frame: Some(WebSocketFrame {
+                    opcode: opcode_str.to_string(),
+                    fin: frame.fin,
+                    payload: frame.payload,
+                    bytes_consumed: bytes_consumed as u32,
+                    close_code,
+                    close_reason,
+                }),
+                error: None,
                 incomplete: false,
-            };
+            }
         }
-    };
-
-    // Second byte: MASK (1 bit), Payload length (7 bits)
-    let masked = (data[1] & 0x80) != 0;
-    let payload_len_7bit = (data[1] & 0x7F) as usize;
-
-    // Calculate actual payload length and header size
-    let (payload_len, header_size) = if payload_len_7bit == 126 {
-        // 16-bit extended length
-        if data.len() < 4 {
-            return WebSocketParseResult {
-                frame: None,
-                error: None,
-                incomplete: true,
-            };
+        None => {
+            // Could be incomplete or invalid
+            if data.len() < 2 {
+                WebSocketParseResult {
+                    frame: None,
+                    error: None,
+                    incomplete: true,
+                }
+            } else {
+                // Check if opcode is valid
+                let opcode_raw = data[0] & 0x0F;
+                if CoreOpcode::from_u8(opcode_raw).is_none() {
+                    WebSocketParseResult {
+                        frame: None,
+                        error: Some(format!("Invalid opcode: {}", opcode_raw)),
+                        incomplete: false,
+                    }
+                } else {
+                    // Probably just needs more data
+                    WebSocketParseResult {
+                        frame: None,
+                        error: None,
+                        incomplete: true,
+                    }
+                }
+            }
         }
-        let len = u16::from_be_bytes([data[2], data[3]]) as usize;
-        (len, 4)
-    } else if payload_len_7bit == 127 {
-        // 64-bit extended length
-        if data.len() < 10 {
-            return WebSocketParseResult {
-                frame: None,
-                error: None,
-                incomplete: true,
-            };
-        }
-        let len = u64::from_be_bytes([
-            data[2], data[3], data[4], data[5],
-            data[6], data[7], data[8], data[9],
-        ]) as usize;
-        (len, 10)
-    } else {
-        (payload_len_7bit, 2)
-    };
-
-    // Calculate total frame size
-    let mask_size = if masked { 4 } else { 0 };
-    let total_size = header_size + mask_size + payload_len;
-
-    if data.len() < total_size {
-        return WebSocketParseResult {
-            frame: None,
-            error: None,
-            incomplete: true,
-        };
-    }
-
-    // Extract mask key if present
-    let mask_key = if masked {
-        Some([
-            data[header_size],
-            data[header_size + 1],
-            data[header_size + 2],
-            data[header_size + 3],
-        ])
-    } else {
-        None
-    };
-
-    // Extract and unmask payload
-    let payload_start = header_size + mask_size;
-    let mut payload = data[payload_start..payload_start + payload_len].to_vec();
-
-    if let Some(mask) = mask_key {
-        for (i, byte) in payload.iter_mut().enumerate() {
-            *byte ^= mask[i % 4];
-        }
-    }
-
-    // Parse close code and reason for close frames
-    let (close_code, close_reason) = if opcode == WebSocketOpcode::Close && payload.len() >= 2 {
-        let code = u16::from_be_bytes([payload[0], payload[1]]) as u32;
-        let reason = if payload.len() > 2 {
-            String::from_utf8(payload[2..].to_vec()).ok()
-        } else {
-            None
-        };
-        (Some(code), reason)
-    } else {
-        (None, None)
-    };
-
-    let opcode_str = match opcode {
-        WebSocketOpcode::Continuation => "continuation",
-        WebSocketOpcode::Text => "text",
-        WebSocketOpcode::Binary => "binary",
-        WebSocketOpcode::Close => "close",
-        WebSocketOpcode::Ping => "ping",
-        WebSocketOpcode::Pong => "pong",
-    };
-
-    WebSocketParseResult {
-        frame: Some(WebSocketFrame {
-            opcode: opcode_str.to_string(),
-            fin,
-            payload,
-            bytes_consumed: total_size as u32,
-            close_code,
-            close_reason,
-        }),
-        error: None,
-        incomplete: false,
     }
 }
 
 /// Encode a WebSocket text frame
-///
-/// Creates an unmasked frame (server->client frames are not masked)
+/// Uses gust_core::WebSocketFrame::text().encode() internally
 #[napi]
 pub fn encode_websocket_text(text: String, fin: Option<bool>) -> Vec<u8> {
-    encode_websocket_frame(WebSocketOpcode::Text, text.into_bytes(), fin.unwrap_or(true))
+    let mut frame = CoreFrame::text(text);
+    frame.fin = fin.unwrap_or(true);
+    frame.encode()
 }
 
 /// Encode a WebSocket binary frame
+/// Uses gust_core::WebSocketFrame::binary().encode() internally
 #[napi]
 pub fn encode_websocket_binary(data: Vec<u8>, fin: Option<bool>) -> Vec<u8> {
-    encode_websocket_frame(WebSocketOpcode::Binary, data, fin.unwrap_or(true))
+    let mut frame = CoreFrame::binary(data);
+    frame.fin = fin.unwrap_or(true);
+    frame.encode()
 }
 
 /// Encode a WebSocket ping frame
+/// Uses gust_core::WebSocketFrame::ping().encode() internally
 #[napi]
 pub fn encode_websocket_ping(data: Option<Vec<u8>>) -> Vec<u8> {
-    encode_websocket_frame(WebSocketOpcode::Ping, data.unwrap_or_default(), true)
+    CoreFrame::ping(data.unwrap_or_default()).encode()
 }
 
 /// Encode a WebSocket pong frame (in response to ping)
+/// Uses gust_core::WebSocketFrame::pong().encode() internally
 #[napi]
 pub fn encode_websocket_pong(data: Option<Vec<u8>>) -> Vec<u8> {
-    encode_websocket_frame(WebSocketOpcode::Pong, data.unwrap_or_default(), true)
+    CoreFrame::pong(data.unwrap_or_default()).encode()
 }
 
 /// Encode a WebSocket close frame
-///
-/// code: Close status code (1000 = normal closure, 1001 = going away, etc.)
-/// reason: Optional UTF-8 close reason string
+/// Uses gust_core::WebSocketFrame::close().encode() internally
 #[napi]
 pub fn encode_websocket_close(code: Option<u32>, reason: Option<String>) -> Vec<u8> {
-    let mut payload = Vec::new();
-
-    if let Some(c) = code {
-        payload.extend_from_slice(&(c as u16).to_be_bytes());
-        if let Some(r) = reason {
-            payload.extend_from_slice(r.as_bytes());
-        }
-    }
-
-    encode_websocket_frame(WebSocketOpcode::Close, payload, true)
+    let code = code.unwrap_or(1000) as u16;
+    let reason = reason.unwrap_or_default();
+    CoreFrame::close(code, &reason).encode()
 }
 
 /// Encode a WebSocket continuation frame (for fragmented messages)
 #[napi]
 pub fn encode_websocket_continuation(data: Vec<u8>, fin: bool) -> Vec<u8> {
-    encode_websocket_frame(WebSocketOpcode::Continuation, data, fin)
-}
-
-/// Internal function to encode a WebSocket frame
-fn encode_websocket_frame(opcode: WebSocketOpcode, payload: Vec<u8>, fin: bool) -> Vec<u8> {
-    let mut frame = Vec::new();
-
-    // First byte: FIN (1 bit) + RSV1-3 (3 bits, all 0) + Opcode (4 bits)
-    let first_byte = if fin { 0x80 } else { 0x00 } | opcode.to_u8();
-    frame.push(first_byte);
-
-    // Second byte: MASK (0 for server->client) + Payload length
-    let payload_len = payload.len();
-
-    if payload_len <= 125 {
-        frame.push(payload_len as u8);
-    } else if payload_len <= 65535 {
-        frame.push(126);
-        frame.extend_from_slice(&(payload_len as u16).to_be_bytes());
-    } else {
-        frame.push(127);
-        frame.extend_from_slice(&(payload_len as u64).to_be_bytes());
-    }
-
-    // Payload (unmasked for server->client)
-    frame.extend_from_slice(&payload);
-
-    frame
+    CoreFrame {
+        fin,
+        opcode: CoreOpcode::Continuation,
+        mask: None,
+        payload: data,
+    }.encode()
 }
 
 /// Mask WebSocket payload data (for client->server frames)

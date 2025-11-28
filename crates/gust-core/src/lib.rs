@@ -39,6 +39,8 @@ pub use middleware::{Middleware, MiddlewareChain};
 // Handlers re-exports
 pub use handlers::{
     WebSocket, WebSocketMessage, WebSocketHandler,
+    Frame as WebSocketFrame, Opcode as WebSocketOpcode, CloseFrame as WebSocketCloseFrame,
+    is_websocket_upgrade, generate_accept_key, upgrade_response as websocket_upgrade_response,
     Sse, SseEvent, SseStream,
     StaticFiles, StaticFileConfig,
     Health, HealthCheck, HealthStatus,
