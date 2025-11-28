@@ -2,6 +2,11 @@
 //!
 //! This library is designed to be shared between WASM and Native bindings.
 //! All platform-specific code is gated behind feature flags.
+//!
+//! ## Features
+//! - `native` - Native server with tokio/hyper
+//! - `tls` - TLS support via rustls
+//! - `compress` - Compression support (gzip, brotli)
 
 #![forbid(unsafe_code)]
 #![warn(clippy::all)]
@@ -10,6 +15,7 @@ pub mod error;
 pub mod request;
 pub mod response;
 pub mod router;
+pub mod middleware;
 
 #[cfg(feature = "native")]
 pub mod server;
@@ -22,6 +28,9 @@ pub use error::{Error, Result};
 pub use request::{Method, Request, RequestBuilder};
 pub use response::{Response, ResponseBuilder, StatusCode};
 pub use router::{Router, RouteMatch};
+
+// Middleware re-exports
+pub use middleware::{Middleware, MiddlewareChain};
 
 #[cfg(feature = "native")]
 pub use server::{ServerConfig, ServerState, StaticRoute, DynamicHandler};

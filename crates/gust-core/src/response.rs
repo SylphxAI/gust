@@ -31,6 +31,8 @@ impl StatusCode {
     pub const GONE: StatusCode = StatusCode(410);
     pub const UNPROCESSABLE_ENTITY: StatusCode = StatusCode(422);
     pub const TOO_MANY_REQUESTS: StatusCode = StatusCode(429);
+    pub const PAYLOAD_TOO_LARGE: StatusCode = StatusCode(413);
+    pub const REQUEST_TIMEOUT: StatusCode = StatusCode(408);
 
     // 5xx Server Errors
     pub const INTERNAL_SERVER_ERROR: StatusCode = StatusCode(500);
