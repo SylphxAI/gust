@@ -47,7 +47,7 @@ pub use handlers::{
 };
 
 #[cfg(feature = "native")]
-pub use server::{ServerConfig, ServerState, StaticRoute, DynamicHandler};
+pub use server::{ServerConfig, ServerState, StaticRoute, DynamicHandler, ConnectionTracker};
 
 #[cfg(feature = "native")]
 pub use server::{create_optimized_socket, from_hyper_request, to_hyper_response};

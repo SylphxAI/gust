@@ -17,6 +17,8 @@ use gust_core::{
     // WebSocket support from core
     WebSocketFrame as CoreFrame, WebSocketOpcode as CoreOpcode,
     generate_accept_key as core_generate_accept_key,
+    // Connection tracking from core
+    ConnectionTracker as CoreConnectionTracker,
     // Middleware
     middleware::{
         MiddlewareChain,
@@ -988,49 +990,14 @@ impl ServerState {
     }
 }
 
-/// Connection tracking for graceful shutdown
-struct ConnectionTracker {
-    /// Active connection count
-    active_connections: std::sync::atomic::AtomicU64,
-    /// Shutdown signal received
-    is_shutting_down: std::sync::atomic::AtomicBool,
-}
-
-impl ConnectionTracker {
-    fn new() -> Self {
-        Self {
-            active_connections: std::sync::atomic::AtomicU64::new(0),
-            is_shutting_down: std::sync::atomic::AtomicBool::new(false),
-        }
-    }
-
-    fn increment(&self) {
-        self.active_connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn decrement(&self) {
-        self.active_connections.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    }
-
-    fn get(&self) -> u64 {
-        self.active_connections.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn is_shutting_down(&self) -> bool {
-        self.is_shutting_down.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn start_shutdown(&self) {
-        self.is_shutting_down.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-}
+// ConnectionTracker is now in gust_core::ConnectionTracker (CoreConnectionTracker)
 
 /// Native HTTP server
 #[napi]
 pub struct GustServer {
     state: Arc<ServerState>,
     shutdown_tx: Arc<RwLock<Option<tokio::sync::oneshot::Sender<()>>>>,
-    connection_tracker: Arc<ConnectionTracker>,
+    connection_tracker: Arc<CoreConnectionTracker>,
 }
 
 #[napi]
@@ -1041,7 +1008,7 @@ impl GustServer {
         Self {
             state: Arc::new(ServerState::new()),
             shutdown_tx: Arc::new(RwLock::new(None)),
-            connection_tracker: Arc::new(ConnectionTracker::new()),
+            connection_tracker: Arc::new(CoreConnectionTracker::new()),
         }
     }
 
@@ -1575,7 +1542,7 @@ impl GustServer {
         };
 
         loop {
-            let active = self.connection_tracker.get();
+            let active = self.connection_tracker.count();
             if active == 0 {
                 return true; // All connections drained
             }
@@ -1595,7 +1562,7 @@ impl GustServer {
     /// Get the number of active connections
     #[napi]
     pub fn active_connections(&self) -> u32 {
-        self.connection_tracker.get() as u32
+        self.connection_tracker.count() as u32
     }
 
     /// Check if server is shutting down
@@ -1610,7 +1577,7 @@ impl Default for GustServer {
         GustServer {
             state: Arc::new(ServerState::new()),
             shutdown_tx: Arc::new(RwLock::new(None)),
-            connection_tracker: Arc::new(ConnectionTracker::new()),
+            connection_tracker: Arc::new(CoreConnectionTracker::new()),
         }
     }
 }

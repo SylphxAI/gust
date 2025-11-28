@@ -207,6 +207,77 @@ pub fn bytes_to_hyper_response(bytes: Bytes) -> hyper::Response<Full<Bytes>> {
         .unwrap()
 }
 
+// ============================================================================
+// Connection Tracking for Graceful Shutdown
+// ============================================================================
+
+use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
+
+/// Tracks active connections for graceful shutdown
+///
+/// Used to:
+/// - Count active connections
+/// - Signal shutdown to reject new connections
+/// - Wait for existing connections to drain
+#[derive(Debug)]
+pub struct ConnectionTracker {
+    /// Active connection count
+    active: AtomicU64,
+    /// Shutdown signal received
+    shutting_down: AtomicBool,
+}
+
+impl Default for ConnectionTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ConnectionTracker {
+    /// Create a new connection tracker
+    pub fn new() -> Self {
+        Self {
+            active: AtomicU64::new(0),
+            shutting_down: AtomicBool::new(false),
+        }
+    }
+
+    /// Increment active connection count
+    #[inline]
+    pub fn increment(&self) {
+        self.active.fetch_add(1, Ordering::SeqCst);
+    }
+
+    /// Decrement active connection count
+    #[inline]
+    pub fn decrement(&self) {
+        self.active.fetch_sub(1, Ordering::SeqCst);
+    }
+
+    /// Get current active connection count
+    #[inline]
+    pub fn count(&self) -> u64 {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    /// Signal that shutdown is in progress
+    pub fn start_shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+    }
+
+    /// Check if shutdown is in progress
+    #[inline]
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutting_down.load(Ordering::SeqCst)
+    }
+
+    /// Reset shutdown state (for testing or restart)
+    pub fn reset(&self) {
+        self.shutting_down.store(false, Ordering::SeqCst);
+        self.active.store(0, Ordering::SeqCst);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
