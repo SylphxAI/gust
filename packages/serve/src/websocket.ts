@@ -3,11 +3,11 @@
  * RFC 6455 compliant WebSocket implementation
  *
  * Architecture:
- * - Uses native Rust implementation when available (via gust-napi)
- * - Falls back to pure TypeScript for edge/serverless environments
+ * - Uses native Rust implementation (via gust-napi)
+ * - Falls back to WASM for edge/serverless environments
+ * - No pure JS implementation (thin wrapper only)
  */
 
-import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import type { Socket } from 'node:net'
 import type { TLSSocket } from 'node:tls'
@@ -19,9 +19,6 @@ import {
 	nativeEncodeWebSocketText,
 	nativeGenerateWebSocketAccept,
 } from './native'
-
-// WebSocket magic GUID for handshake
-const WS_MAGIC_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 
 // Opcodes
 const OPCODE = {
@@ -220,33 +217,11 @@ export class WebSocket extends EventEmitter {
 				break
 		}
 
-		if (nativeFrame) {
-			this.socket.write(nativeFrame)
-			return
+		if (!nativeFrame) {
+			throw new Error('WebSocket frame encoding unavailable (native/WASM not loaded)')
 		}
 
-		// Fallback to JS encoding
-		const payloadLen = payload.length
-		let header: Buffer
-
-		if (payloadLen < 126) {
-			header = Buffer.alloc(2)
-			header[0] = 0x80 | opcode // FIN + opcode
-			header[1] = payloadLen
-		} else if (payloadLen < 65536) {
-			header = Buffer.alloc(4)
-			header[0] = 0x80 | opcode
-			header[1] = 126
-			header.writeUInt16BE(payloadLen, 2)
-		} else {
-			header = Buffer.alloc(10)
-			header[0] = 0x80 | opcode
-			header[1] = 127
-			header.writeBigUInt64BE(BigInt(payloadLen), 2)
-		}
-
-		this.socket.write(header)
-		this.socket.write(payload)
+		this.socket.write(nativeFrame)
 	}
 
 	/**
@@ -293,17 +268,14 @@ export class WebSocket extends EventEmitter {
 
 /**
  * Generate WebSocket accept key
- * Uses native Rust implementation when available.
+ * Uses native Rust/WASM implementation.
  */
 export const generateAcceptKey = (key: string): string => {
-	// Try native first
 	const native = nativeGenerateWebSocketAccept(key)
-	if (native) return native
-
-	// Fallback to Node.js crypto
-	return createHash('sha1')
-		.update(key + WS_MAGIC_GUID)
-		.digest('base64')
+	if (!native) {
+		throw new Error('WebSocket accept key generation unavailable (native/WASM not loaded)')
+	}
+	return native
 }
 
 /**
