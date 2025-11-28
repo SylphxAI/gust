@@ -18,6 +18,7 @@ pub mod session;
 pub mod validate;
 pub mod range;
 pub mod proxy;
+pub mod otel;
 
 // Re-exports for convenience
 pub use cors::{Cors, CorsConfig};
@@ -36,6 +37,12 @@ pub use session::{Session, SessionConfig, SessionStore, MemoryStore as SessionMe
 pub use validate::{Schema, SchemaType, StringFormat, ValidationError, ValidationResult, Value, ValidateConfig, validate};
 pub use range::{Range, ParsedRange, RangeConfig, RangeResponse, parse_range, content_range, get_mime_type, generate_etag};
 pub use proxy::{ProxyInfo, ProxyConfig, Protocol, TrustProxy, TrustedAddress, extract_proxy_info, parse_forwarded_for};
+pub use otel::{
+    Span, SpanContext, SpanStatus, SpanKind, SpanEvent, SpanAttributes, AttributeValue,
+    Tracer, TracerConfig, Counter, Gauge, Histogram, MetricsCollector,
+    generate_trace_id, generate_span_id, parse_traceparent, format_traceparent,
+    parse_tracestate, format_tracestate, http_attrs, service_attrs,
+};
 
 use crate::{Request, Response};
 
