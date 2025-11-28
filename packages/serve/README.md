@@ -4,7 +4,7 @@ High performance functional HTTP server powered by WASM.
 
 ## Features
 
-- **Fast** - WASM-powered HTTP parser and Radix Trie router
+- **Fast** - Native Rust server with WASM fallback, Radix Trie router
 - **Functional** - Composable middleware with `pipe()` and `compose()`
 - **Type-safe** - Full TypeScript support with path param inference
 - **Zero dependencies** - Core functionality built-in

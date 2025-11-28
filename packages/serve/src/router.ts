@@ -267,7 +267,19 @@ export const merge = <T extends Routes[]>(...routeObjects: T): T[number] => {
 	return Object.assign({}, ...routeObjects)
 }
 
-/** Group routes (legacy) */
+/**
+ * Group routes with prefix (legacy)
+ * @deprecated Use `prefix()` with named routes instead:
+ * ```typescript
+ * // Before (legacy)
+ * const routes = group('/api', get('/users', h1), get('/posts', h2))
+ * router(get('/'), ...routes)
+ *
+ * // After (recommended)
+ * const apiRoutes = prefix('/api', { users: get('/users', h1), posts: get('/posts', h2) })
+ * router(merge({ home: get('/', h) }, apiRoutes))
+ * ```
+ */
 export const group = <TPrefix extends string>(p: TPrefix, ...routes: Route[]): Route[] =>
 	routes.map((route) => ({
 		...route,
