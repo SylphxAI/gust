@@ -1,12 +1,15 @@
 /**
  * Session Management
  * Cookie-based sessions with pluggable stores
+ *
+ * Uses native Rust/WASM for session ID generation.
+ * HMAC signing uses Node.js crypto (requires user secret).
  */
 
-import { randomBytes } from 'node:crypto'
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
 import type { Context } from './context'
 import { type CookieOptions, parseCookies, serializeCookie } from './cookie'
+import { nativeGenerateTraceId } from './native'
 
 // ============================================================================
 // Types
@@ -71,9 +74,15 @@ export type SessionOptions = {
 
 /**
  * Generate secure session ID
+ * Uses native Rust/WASM for random generation.
  */
 export const generateSessionId = (): string => {
-	return randomBytes(24).toString('base64url')
+	// Use trace ID (32 hex chars) and convert to base64url for shorter representation
+	const traceId = nativeGenerateTraceId()
+	if (!traceId) throw new Error('Native trace ID generation unavailable')
+	// Convert hex to base64url (32 hex chars = 16 bytes = ~22 base64 chars)
+	const bytes = Buffer.from(traceId, 'hex')
+	return bytes.toString('base64url')
 }
 
 /**

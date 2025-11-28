@@ -1,13 +1,17 @@
 /**
  * CSRF Protection
  * Cross-Site Request Forgery prevention
+ *
+ * Uses native Rust/WASM for random generation.
+ * HMAC signing uses Node.js crypto (requires user secret).
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
 import { forbidden } from '@sylphx/gust-core'
 import type { Context } from './context'
 import { type CookieOptions, parseCookies, serializeCookie } from './cookie'
+import { nativeGenerateTraceId } from './native'
 
 // ============================================================================
 // Types
@@ -39,17 +43,42 @@ export type CsrfOptions = {
 // ============================================================================
 
 /**
+ * Generate random bytes as base64url
+ * Uses native Rust/WASM for random generation.
+ * @param byteLength - Number of random bytes (output will be ~4/3 longer in base64)
+ */
+const generateRandomBase64url = (byteLength: number): string => {
+	// Each trace ID = 32 hex chars = 16 bytes
+	const bytesNeeded = byteLength
+	const traceIdsNeeded = Math.ceil(bytesNeeded / 16)
+
+	let hexString = ''
+	for (let i = 0; i < traceIdsNeeded; i++) {
+		const traceId = nativeGenerateTraceId()
+		if (!traceId) throw new Error('Native trace ID generation unavailable')
+		hexString += traceId
+	}
+
+	// Convert hex to bytes and then to base64url
+	const bytes = Buffer.from(hexString.slice(0, byteLength * 2), 'hex')
+	return bytes.toString('base64url')
+}
+
+/**
  * Generate CSRF secret (stored in cookie)
+ * Uses native Rust/WASM for random generation.
+ * @param length - Number of random bytes (default 32)
  */
 export const generateCsrfSecret = (length = 32): string => {
-	return randomBytes(length).toString('base64url')
+	return generateRandomBase64url(length)
 }
 
 /**
  * Generate CSRF token from secret
+ * Uses native random for salt, HMAC for signing.
  */
 export const generateCsrfToken = (secret: string, salt?: string): string => {
-	const tokenSalt = salt || randomBytes(8).toString('base64url')
+	const tokenSalt = salt || generateRandomBase64url(8) // 8 bytes = ~11 base64 chars
 	const hash = createHmac('sha256', secret).update(tokenSalt).digest('base64url')
 	return `${tokenSalt}.${hash}`
 }
@@ -221,7 +250,7 @@ export const csrfDoubleSubmit = (options: Omit<CsrfOptions, 'secret'> = {}): Wra
 			let tokenIsNew = false
 
 			if (!csrfToken) {
-				csrfToken = randomBytes(tokenLength).toString('base64url')
+				csrfToken = generateRandomBase64url(tokenLength)
 				tokenIsNew = true
 			}
 
