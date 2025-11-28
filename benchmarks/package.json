@@ -1,0 +1,17 @@
+{
+	"name": "gust-benchmarks",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"bench": "bun run bench.ts",
+		"bench:node": "node --experimental-strip-types bench.ts"
+	},
+	"dependencies": {
+		"express": "^4.21.0",
+		"fastify": "^5.0.0",
+		"hono": "^4.6.0",
+		"elysia": "^1.1.0",
+		"h3": "^1.13.0",
+		"@hono/node-server": "^1.13.0"
+	}
+}
