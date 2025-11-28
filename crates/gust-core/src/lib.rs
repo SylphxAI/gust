@@ -19,6 +19,9 @@ pub mod middleware;
 pub mod handlers;
 
 #[cfg(feature = "native")]
+pub mod http2;
+
+#[cfg(feature = "native")]
 pub mod server;
 
 #[cfg(feature = "tls")]
@@ -46,6 +49,9 @@ pub use server::{ServerConfig, ServerState, StaticRoute, DynamicHandler};
 
 #[cfg(feature = "native")]
 pub use server::{create_optimized_socket, from_hyper_request, to_hyper_response};
+
+#[cfg(feature = "native")]
+pub use http2::{Http2Settings, Http2Response, PushPromise, Priority, ConnectionInfo};
 
 #[cfg(feature = "tls")]
 pub use tls::{TlsConfig, load_certs, load_private_key};

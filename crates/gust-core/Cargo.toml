@@ -29,8 +29,8 @@ bumpalo.workspace = true
 
 # Native-only dependencies
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "fs"] }
-hyper = { workspace = true, optional = true, features = ["server", "http1"] }
-hyper-util = { workspace = true, optional = true, features = ["tokio"] }
+hyper = { workspace = true, optional = true, features = ["server", "http1", "http2"] }
+hyper-util = { workspace = true, optional = true, features = ["tokio", "http2"] }
 http-body-util = { workspace = true, optional = true }
 socket2 = { workspace = true, optional = true }
 num_cpus = { workspace = true, optional = true }
