@@ -89,14 +89,206 @@ export interface NativeServerConfig {
 	compression?: NativeCompressionConfig
 }
 
+// ============================================================================
+// Circuit Breaker Types
+// ============================================================================
+
+/** Circuit breaker configuration */
+export interface NativeCircuitBreakerConfig {
+	/** Number of failures before opening circuit */
+	failureThreshold: number
+	/** Number of successes before closing circuit (from half-open) */
+	successThreshold: number
+	/** Time in milliseconds before attempting to recover */
+	resetTimeoutMs: number
+	/** Time window in milliseconds for counting failures */
+	failureWindowMs: number
+	/** Request timeout in milliseconds */
+	timeoutMs: number
+	/** Circuit breaker name */
+	name?: string
+}
+
+/** Circuit breaker statistics */
+export interface NativeCircuitStats {
+	state: string
+	failures: number
+	successes: number
+	totalRequests: number
+	totalFailures: number
+	totalSuccesses: number
+}
+
+/** Native circuit breaker instance */
+export interface NativeCircuitBreaker {
+	canRequest(): boolean
+	recordSuccess(): void
+	recordFailure(): void
+	state(): string
+	stats(): NativeCircuitStats
+	reset(): void
+}
+
+/** Bulkhead configuration */
+export interface NativeBulkheadConfig {
+	/** Maximum concurrent requests */
+	maxConcurrent: number
+	/** Maximum queue size */
+	maxQueue: number
+	/** Queue timeout in milliseconds */
+	queueTimeoutMs: number
+}
+
+/** Native bulkhead instance */
+export interface NativeBulkhead {
+	tryAcquire(): boolean
+	running(): number
+	queued(): number
+}
+
+// ============================================================================
+// Validation Types
+// ============================================================================
+
+/** Schema type */
+export type NativeSchemaType = 'String' | 'Number' | 'Boolean' | 'Object' | 'Array' | 'Any'
+
+/** String format */
+export type NativeStringFormat = 'Email' | 'Url' | 'Uuid' | 'Date' | 'DateTime'
+
+/** Validation error */
+export interface NativeValidationError {
+	path: string
+	message: string
+	code: string
+}
+
+/** Validation result */
+export interface NativeValidationResult {
+	valid: boolean
+	errors: NativeValidationError[]
+}
+
+// ============================================================================
+// Range Request Types
+// ============================================================================
+
+/** Parsed range */
+export interface NativeParsedRange {
+	start: number
+	end: number
+}
+
+// ============================================================================
+// Proxy Types
+// ============================================================================
+
+/** Proxy trust mode */
+export type NativeTrustProxy = 'None' | 'All' | 'Loopback'
+
+/** Proxy information */
+export interface NativeProxyInfo {
+	ip: string
+	host: string
+	protocol: string
+	port: number
+	ips: string[]
+}
+
+// ============================================================================
+// OpenTelemetry Types
+// ============================================================================
+
+/** Span context */
+export interface NativeSpanContext {
+	traceId: string
+	spanId: string
+	traceFlags: number
+}
+
+/** Span status */
+export type NativeSpanStatus = 'Unset' | 'Ok' | 'Error'
+
+/** Native span instance */
+export interface NativeSpan {
+	context(): NativeSpanContext | null
+	setAttribute(key: string, value: string): void
+	setAttributeNumber(key: string, value: number): void
+	end(): void
+	endWithStatus(status: NativeSpanStatus): void
+	durationMs(): number | null
+}
+
+/** Native tracer instance */
+export interface NativeTracer {
+	startSpan(name: string): NativeSpan
+	startChildSpan(name: string, parentTraceId: string, parentSpanId: string): NativeSpan
+	pendingCount(): number
+}
+
+/** Native metrics collector instance */
+export interface NativeMetricsCollector {
+	counterInc(name: string): void
+	counterAdd(name: string, value: number): void
+	counterGet(name: string): number
+	gaugeSet(name: string, value: number): void
+	gaugeGet(name: string): number
+	histogramRecord(name: string, value: number): void
+	histogramCount(name: string): number
+	histogramSum(name: string): number
+	histogramMean(name: string): number
+	histogramPercentile(name: string, percentile: number): number
+	toPrometheus(): string
+}
+
 // Native binding interface (from @sylphx/gust-napi)
 export interface NativeBinding {
+	// Server
 	GustServer: new () => NativeServer
 	GustServerWithConfig: (config: NativeServerConfig) => Promise<NativeServer>
 	isIoUringAvailable: () => boolean
 	getCpuCount: () => number
 	corsPermissive: () => NativeCorsConfig
 	securityStrict: () => NativeSecurityConfig
+	// Circuit Breaker
+	CircuitBreaker: new (
+		config: NativeCircuitBreakerConfig
+	) => NativeCircuitBreaker
+	Bulkhead: new (config: NativeBulkheadConfig) => NativeBulkhead
+	// Validation
+	validateJson: (
+		jsonStr: string,
+		schemaType: NativeSchemaType,
+		required: boolean,
+		minLength?: number,
+		maxLength?: number,
+		format?: NativeStringFormat,
+		min?: number,
+		max?: number,
+		isInteger?: boolean
+	) => NativeValidationResult
+	// Range Requests
+	parseRangeHeader: (header: string, fileSize: number) => NativeParsedRange | null
+	contentRangeHeader: (start: number, end: number, total: number) => string
+	getMimeType: (extension: string) => string
+	generateEtag: (mtimeMs: number, size: number) => string
+	// Proxy
+	extractProxyInfo: (
+		trust: NativeTrustProxy,
+		socketIp: string,
+		forwardedFor?: string,
+		forwardedHost?: string,
+		forwardedProto?: string,
+		forwardedPort?: string,
+		hostHeader?: string
+	) => NativeProxyInfo
+	// OpenTelemetry
+	generateTraceId: () => string
+	generateSpanId: () => string
+	parseTraceparent: (header: string) => NativeSpanContext | null
+	formatTraceparent: (traceId: string, spanId: string, traceFlags: number) => string
+	Tracer: new (serviceName: string, sampleRate?: number) => NativeTracer
+	MetricsCollector: new () => NativeMetricsCollector
 }
 
 export interface NativeServer {
@@ -556,4 +748,236 @@ export const createNativeServerWithConfig = async (
 	const binding = loadNative()
 	if (!binding) return null
 	return binding.GustServerWithConfig(config)
+}
+
+// ============================================================================
+// Native Circuit Breaker
+// ============================================================================
+
+/**
+ * Create a native circuit breaker
+ *
+ * @example
+ * ```ts
+ * const breaker = createNativeCircuitBreaker({
+ *   failureThreshold: 5,
+ *   successThreshold: 2,
+ *   resetTimeoutMs: 30000,
+ *   failureWindowMs: 60000,
+ *   timeoutMs: 10000,
+ *   name: 'api'
+ * })
+ * if (breaker?.canRequest()) {
+ *   try {
+ *     await fetch(...)
+ *     breaker.recordSuccess()
+ *   } catch {
+ *     breaker.recordFailure()
+ *   }
+ * }
+ * ```
+ */
+export const createNativeCircuitBreaker = (
+	config: NativeCircuitBreakerConfig
+): NativeCircuitBreaker | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return new binding.CircuitBreaker(config)
+}
+
+/**
+ * Create a native bulkhead (concurrency limiter)
+ */
+export const createNativeBulkhead = (config: NativeBulkheadConfig): NativeBulkhead | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return new binding.Bulkhead(config)
+}
+
+// ============================================================================
+// Native Validation
+// ============================================================================
+
+/**
+ * Validate JSON string against schema using native Rust implementation
+ */
+export const nativeValidateJson = (
+	jsonStr: string,
+	schemaType: NativeSchemaType,
+	options?: {
+		required?: boolean
+		minLength?: number
+		maxLength?: number
+		format?: NativeStringFormat
+		min?: number
+		max?: number
+		isInteger?: boolean
+	}
+): NativeValidationResult | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.validateJson(
+		jsonStr,
+		schemaType,
+		options?.required ?? true,
+		options?.minLength,
+		options?.maxLength,
+		options?.format,
+		options?.min,
+		options?.max,
+		options?.isInteger
+	)
+}
+
+// ============================================================================
+// Native Range Requests
+// ============================================================================
+
+/**
+ * Parse HTTP Range header using native Rust implementation
+ */
+export const nativeParseRange = (header: string, fileSize: number): NativeParsedRange | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.parseRangeHeader(header, fileSize)
+}
+
+/**
+ * Generate Content-Range header value
+ */
+export const nativeContentRange = (start: number, end: number, total: number): string | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.contentRangeHeader(start, end, total)
+}
+
+/**
+ * Get MIME type from file extension
+ */
+export const nativeGetMimeType = (extension: string): string | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.getMimeType(extension)
+}
+
+/**
+ * Generate ETag from file metadata
+ */
+export const nativeGenerateEtag = (mtimeMs: number, size: number): string | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.generateEtag(mtimeMs, size)
+}
+
+// ============================================================================
+// Native Proxy
+// ============================================================================
+
+/**
+ * Extract proxy information from headers using native Rust implementation
+ */
+export const nativeExtractProxyInfo = (
+	trust: NativeTrustProxy,
+	socketIp: string,
+	headers?: {
+		forwardedFor?: string
+		forwardedHost?: string
+		forwardedProto?: string
+		forwardedPort?: string
+		host?: string
+	}
+): NativeProxyInfo | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.extractProxyInfo(
+		trust,
+		socketIp,
+		headers?.forwardedFor,
+		headers?.forwardedHost,
+		headers?.forwardedProto,
+		headers?.forwardedPort,
+		headers?.host
+	)
+}
+
+// ============================================================================
+// Native OpenTelemetry
+// ============================================================================
+
+/**
+ * Generate a trace ID (32 hex chars) using native Rust implementation
+ */
+export const nativeGenerateTraceId = (): string | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.generateTraceId()
+}
+
+/**
+ * Generate a span ID (16 hex chars) using native Rust implementation
+ */
+export const nativeGenerateSpanId = (): string | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.generateSpanId()
+}
+
+/**
+ * Parse W3C traceparent header
+ */
+export const nativeParseTraceparent = (header: string): NativeSpanContext | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.parseTraceparent(header)
+}
+
+/**
+ * Format W3C traceparent header
+ */
+export const nativeFormatTraceparent = (
+	traceId: string,
+	spanId: string,
+	traceFlags: number
+): string | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.formatTraceparent(traceId, spanId, traceFlags)
+}
+
+/**
+ * Create a native tracer
+ *
+ * @example
+ * ```ts
+ * const tracer = createNativeTracer('my-service')
+ * const span = tracer?.startSpan('handle-request')
+ * span?.setAttribute('http.method', 'GET')
+ * // ... do work ...
+ * span?.endWithStatus('Ok')
+ * ```
+ */
+export const createNativeTracer = (
+	serviceName: string,
+	sampleRate?: number
+): NativeTracer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return new binding.Tracer(serviceName, sampleRate)
+}
+
+/**
+ * Create a native metrics collector
+ *
+ * @example
+ * ```ts
+ * const metrics = createNativeMetricsCollector()
+ * metrics?.counterInc('http_requests_total')
+ * metrics?.histogramRecord('request_duration_ms', 125)
+ * console.log(metrics?.toPrometheus())
+ * ```
+ */
+export const createNativeMetricsCollector = (): NativeMetricsCollector | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return new binding.MetricsCollector()
 }

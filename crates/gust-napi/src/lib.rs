@@ -6,7 +6,14 @@
 use bytes::Bytes;
 use gust_core::{
     Method, Request, Response, ResponseBuilder, Router, StatusCode,
-    middleware::MiddlewareChain,
+    middleware::{
+        MiddlewareChain,
+        circuit_breaker::{CircuitBreaker as RustCircuitBreaker, CircuitBreakerConfig as RustCBConfig, Bulkhead as RustBulkhead, BulkheadConfig as RustBulkheadConfig, CircuitState as RustCircuitState},
+        validate::{Schema as RustSchema, SchemaType as RustSchemaType, StringFormat as RustStringFormat, Value as RustValue, validate as rust_validate},
+        range::{parse_range as rust_parse_range, content_range as rust_content_range, get_mime_type as rust_get_mime_type, generate_etag as rust_generate_etag},
+        proxy::{ProxyConfig as RustProxyConfig, TrustProxy as RustTrustProxy, extract_proxy_info as rust_extract_proxy_info},
+        otel::{Span as RustSpan, SpanContext as RustSpanContext, SpanStatus as RustSpanStatus, Tracer as RustTracer, TracerConfig as RustTracerConfig, MetricsCollector as RustMetricsCollector, generate_trace_id as rust_generate_trace_id, generate_span_id as rust_generate_span_id, parse_traceparent as rust_parse_traceparent, format_traceparent as rust_format_traceparent},
+    },
 };
 use http_body_util::Full;
 use napi::bindgen_prelude::*;
@@ -120,6 +127,712 @@ pub struct ServerConfig {
     pub security: Option<SecurityConfig>,
     /// Compression configuration
     pub compression: Option<CompressionConfig>,
+}
+
+// ============================================================================
+// Circuit Breaker
+// ============================================================================
+
+/// Circuit breaker configuration
+#[napi(object)]
+#[derive(Clone)]
+pub struct CircuitBreakerConfig {
+    /// Number of failures before opening circuit
+    pub failure_threshold: u32,
+    /// Number of successes before closing circuit (from half-open)
+    pub success_threshold: u32,
+    /// Time in milliseconds before attempting to recover
+    pub reset_timeout_ms: u32,
+    /// Time window in milliseconds for counting failures
+    pub failure_window_ms: u32,
+    /// Request timeout in milliseconds
+    pub timeout_ms: u32,
+    /// Circuit breaker name
+    pub name: Option<String>,
+}
+
+/// Circuit breaker state
+#[napi(string_enum)]
+pub enum CircuitState {
+    Closed,
+    Open,
+    HalfOpen,
+}
+
+/// Circuit breaker stats
+#[napi(object)]
+pub struct CircuitStats {
+    pub state: String,
+    pub failures: u32,
+    pub successes: u32,
+    pub total_requests: i64,
+    pub total_failures: i64,
+    pub total_successes: i64,
+}
+
+/// Circuit breaker wrapper for napi
+#[napi]
+pub struct CircuitBreaker {
+    inner: Arc<RustCircuitBreaker>,
+}
+
+#[napi]
+impl CircuitBreaker {
+    #[napi(constructor)]
+    pub fn new(config: CircuitBreakerConfig) -> Self {
+        let name = config.name.unwrap_or_else(|| "default".to_string());
+        let rust_config = RustCBConfig::new(name)
+            .failure_threshold(config.failure_threshold)
+            .success_threshold(config.success_threshold)
+            .reset_timeout(Duration::from_millis(config.reset_timeout_ms as u64))
+            .failure_window(Duration::from_millis(config.failure_window_ms as u64))
+            .timeout(Duration::from_millis(config.timeout_ms as u64));
+
+        Self {
+            inner: Arc::new(RustCircuitBreaker::new(rust_config)),
+        }
+    }
+
+    /// Check if request can proceed
+    #[napi]
+    pub fn can_request(&self) -> bool {
+        self.inner.can_request()
+    }
+
+    /// Record successful request
+    #[napi]
+    pub fn record_success(&self) {
+        self.inner.record_success();
+    }
+
+    /// Record failed request
+    #[napi]
+    pub fn record_failure(&self) {
+        self.inner.record_failure();
+    }
+
+    /// Get current state
+    #[napi]
+    pub fn state(&self) -> String {
+        match self.inner.state() {
+            RustCircuitState::Closed => "closed".to_string(),
+            RustCircuitState::Open => "open".to_string(),
+            RustCircuitState::HalfOpen => "half-open".to_string(),
+        }
+    }
+
+    /// Get statistics
+    #[napi]
+    pub fn stats(&self) -> CircuitStats {
+        let stats = self.inner.stats();
+        CircuitStats {
+            state: match stats.state {
+                RustCircuitState::Closed => "closed".to_string(),
+                RustCircuitState::Open => "open".to_string(),
+                RustCircuitState::HalfOpen => "half-open".to_string(),
+            },
+            failures: stats.failures,
+            successes: stats.successes,
+            total_requests: stats.total_requests as i64,
+            total_failures: stats.total_failures as i64,
+            total_successes: stats.total_successes as i64,
+        }
+    }
+
+    /// Reset circuit breaker
+    #[napi]
+    pub fn reset(&self) {
+        self.inner.reset();
+    }
+}
+
+/// Bulkhead configuration
+#[napi(object)]
+#[derive(Clone)]
+pub struct BulkheadConfig {
+    /// Maximum concurrent requests
+    pub max_concurrent: u32,
+    /// Maximum queue size
+    pub max_queue: u32,
+    /// Queue timeout in milliseconds
+    pub queue_timeout_ms: u32,
+}
+
+/// Bulkhead for concurrency limiting
+#[napi]
+pub struct Bulkhead {
+    inner: Arc<RustBulkhead>,
+}
+
+#[napi]
+impl Bulkhead {
+    #[napi(constructor)]
+    pub fn new(config: BulkheadConfig) -> Self {
+        let rust_config = RustBulkheadConfig::new(config.max_concurrent)
+            .max_queue(config.max_queue)
+            .queue_timeout(Duration::from_millis(config.queue_timeout_ms as u64));
+
+        Self {
+            inner: Arc::new(RustBulkhead::new(rust_config)),
+        }
+    }
+
+    /// Try to acquire a permit
+    #[napi]
+    pub fn try_acquire(&self) -> bool {
+        self.inner.try_acquire().is_ok()
+    }
+
+    /// Get current running count
+    #[napi]
+    pub fn running(&self) -> u32 {
+        self.inner.running()
+    }
+
+    /// Get queue length
+    #[napi]
+    pub fn queued(&self) -> u32 {
+        self.inner.queued()
+    }
+
+}
+
+// ============================================================================
+// Validation
+// ============================================================================
+
+/// Validation error
+#[napi(object)]
+#[derive(Clone)]
+pub struct ValidationError {
+    pub path: String,
+    pub message: String,
+    pub code: String,
+}
+
+/// Validation result
+#[napi(object)]
+pub struct ValidationResult {
+    pub valid: bool,
+    pub errors: Vec<ValidationError>,
+}
+
+/// Schema type enum
+#[napi(string_enum)]
+pub enum SchemaType {
+    String,
+    Number,
+    Boolean,
+    Object,
+    Array,
+    Any,
+}
+
+/// String format enum
+#[napi(string_enum)]
+pub enum StringFormat {
+    Email,
+    Url,
+    Uuid,
+    Date,
+    DateTime,
+}
+
+/// Validate JSON value against schema
+#[napi]
+pub fn validate_json(
+    json_str: String,
+    schema_type: SchemaType,
+    required: bool,
+    min_length: Option<u32>,
+    max_length: Option<u32>,
+    format: Option<StringFormat>,
+    min: Option<f64>,
+    max: Option<f64>,
+    is_integer: Option<bool>,
+) -> ValidationResult {
+    // Parse JSON
+    let value = match parse_json_to_value(&json_str) {
+        Ok(v) => v,
+        Err(e) => {
+            return ValidationResult {
+                valid: false,
+                errors: vec![ValidationError {
+                    path: "$".to_string(),
+                    message: format!("Invalid JSON: {}", e),
+                    code: "invalid_type".to_string(),
+                }],
+            };
+        }
+    };
+
+    // Build schema
+    let rust_schema_type = match schema_type {
+        SchemaType::String => RustSchemaType::String,
+        SchemaType::Number => RustSchemaType::Number,
+        SchemaType::Boolean => RustSchemaType::Boolean,
+        SchemaType::Object => RustSchemaType::Object,
+        SchemaType::Array => RustSchemaType::Array,
+        SchemaType::Any => RustSchemaType::Any,
+    };
+
+    let rust_format = format.map(|f| match f {
+        StringFormat::Email => RustStringFormat::Email,
+        StringFormat::Url => RustStringFormat::Url,
+        StringFormat::Uuid => RustStringFormat::Uuid,
+        StringFormat::Date => RustStringFormat::Date,
+        StringFormat::DateTime => RustStringFormat::DateTime,
+    });
+
+    let schema = RustSchema {
+        schema_type: rust_schema_type,
+        required,
+        nullable: false,
+        min_length: min_length.map(|x| x as usize),
+        max_length: max_length.map(|x| x as usize),
+        pattern: None,
+        format: rust_format,
+        min,
+        max,
+        integer: is_integer.unwrap_or(false),
+        enum_values: None,
+        properties: None,
+        additional_properties: true,
+        items: None,
+        min_items: None,
+        max_items: None,
+        unique_items: false,
+    };
+
+    let errors = rust_validate(&value, &schema, "$");
+
+    ValidationResult {
+        valid: errors.is_empty(),
+        errors: errors
+            .into_iter()
+            .map(|e| ValidationError {
+                path: e.path,
+                message: e.message,
+                code: "validation_error".to_string(),
+            })
+            .collect(),
+    }
+}
+
+fn parse_json_to_value(json: &str) -> std::result::Result<RustValue, String> {
+    // Simple JSON parser - handles basic types
+    let json = json.trim();
+
+    if json == "null" {
+        return Ok(RustValue::Null);
+    }
+    if json == "true" {
+        return Ok(RustValue::Bool(true));
+    }
+    if json == "false" {
+        return Ok(RustValue::Bool(false));
+    }
+    if json.starts_with('"') && json.ends_with('"') {
+        return Ok(RustValue::String(json[1..json.len()-1].to_string()));
+    }
+    if let Ok(n) = json.parse::<f64>() {
+        return Ok(RustValue::Number(n));
+    }
+    if json.starts_with('[') {
+        return Ok(RustValue::Array(vec![])); // Simplified
+    }
+    if json.starts_with('{') {
+        return Ok(RustValue::Object(HashMap::new())); // Simplified
+    }
+
+    Err("Failed to parse JSON".to_string())
+}
+
+// ============================================================================
+// Range Requests
+// ============================================================================
+
+/// Parsed range
+#[napi(object)]
+#[derive(Clone)]
+pub struct ParsedRange {
+    pub start: i64,
+    pub end: i64,
+}
+
+/// Range response metadata
+#[napi(object)]
+#[derive(Clone)]
+pub struct RangeResponseMeta {
+    pub status: u32,
+    pub content_type: String,
+    pub content_length: i64,
+    pub content_range: Option<String>,
+    pub accept_ranges: String,
+    pub etag: String,
+}
+
+/// Parse HTTP Range header
+#[napi]
+pub fn parse_range_header(header: String, file_size: i64) -> Option<ParsedRange> {
+    rust_parse_range(&header, file_size as u64).and_then(|parsed| {
+        parsed.ranges.first().map(|r| ParsedRange {
+            start: r.start as i64,
+            end: r.end as i64,
+        })
+    })
+}
+
+/// Generate Content-Range header value
+#[napi]
+pub fn content_range_header(start: i64, end: i64, total: i64) -> String {
+    rust_content_range(start as u64, end as u64, total as u64)
+}
+
+/// Get MIME type from file extension
+#[napi]
+pub fn get_mime_type(extension: String) -> String {
+    rust_get_mime_type(&extension).to_string()
+}
+
+/// Generate ETag from file metadata
+#[napi]
+pub fn generate_etag(mtime_ms: i64, size: i64) -> String {
+    rust_generate_etag(mtime_ms as u64, size as u64)
+}
+
+// ============================================================================
+// Proxy Headers
+// ============================================================================
+
+/// Proxy information
+#[napi(object)]
+#[derive(Clone)]
+pub struct ProxyInfo {
+    /// Client IP address
+    pub ip: String,
+    /// Original host
+    pub host: String,
+    /// Original protocol (http/https)
+    pub protocol: String,
+    /// Original port
+    pub port: u32,
+    /// Chain of forwarded IPs
+    pub ips: Vec<String>,
+}
+
+/// Proxy trust mode
+#[napi(string_enum)]
+pub enum TrustProxy {
+    None,
+    All,
+    Loopback,
+}
+
+/// Extract proxy information from headers
+#[napi]
+pub fn extract_proxy_info(
+    trust: TrustProxy,
+    socket_ip: String,
+    forwarded_for: Option<String>,
+    forwarded_host: Option<String>,
+    forwarded_proto: Option<String>,
+    forwarded_port: Option<String>,
+    host_header: Option<String>,
+) -> ProxyInfo {
+    let rust_trust = match trust {
+        TrustProxy::None => RustTrustProxy::None,
+        TrustProxy::All => RustTrustProxy::All,
+        TrustProxy::Loopback => RustTrustProxy::Addresses(vec![
+            gust_core::middleware::proxy::TrustedAddress::parse("127.0.0.1").unwrap(),
+            gust_core::middleware::proxy::TrustedAddress::parse("::1").unwrap(),
+            gust_core::middleware::proxy::TrustedAddress::parse("10.0.0.0/8").unwrap(),
+            gust_core::middleware::proxy::TrustedAddress::parse("172.16.0.0/12").unwrap(),
+            gust_core::middleware::proxy::TrustedAddress::parse("192.168.0.0/16").unwrap(),
+        ]),
+    };
+
+    let config = RustProxyConfig {
+        trust: rust_trust,
+        ip_header: "x-forwarded-for".to_string(),
+        host_header: "x-forwarded-host".to_string(),
+        proto_header: "x-forwarded-proto".to_string(),
+        port_header: "x-forwarded-port".to_string(),
+    };
+
+    let mut headers = Vec::new();
+    if let Some(v) = forwarded_for {
+        headers.push(("x-forwarded-for".to_string(), v));
+    }
+    if let Some(v) = forwarded_host {
+        headers.push(("x-forwarded-host".to_string(), v));
+    }
+    if let Some(v) = forwarded_proto {
+        headers.push(("x-forwarded-proto".to_string(), v));
+    }
+    if let Some(v) = forwarded_port {
+        headers.push(("x-forwarded-port".to_string(), v));
+    }
+
+    let info = rust_extract_proxy_info(&config, &socket_ip, &headers, host_header.as_deref());
+
+    ProxyInfo {
+        ip: info.ip,
+        host: info.host,
+        protocol: info.protocol.as_str().to_string(),
+        port: info.port as u32,
+        ips: info.ips,
+    }
+}
+
+// ============================================================================
+// OpenTelemetry
+// ============================================================================
+
+/// Span context
+#[napi(object)]
+#[derive(Clone)]
+pub struct SpanContext {
+    pub trace_id: String,
+    pub span_id: String,
+    pub trace_flags: u32,
+}
+
+/// Span status
+#[napi(string_enum)]
+pub enum SpanStatus {
+    Unset,
+    Ok,
+    Error,
+}
+
+/// Generate trace ID (32 hex chars)
+#[napi]
+pub fn generate_trace_id() -> String {
+    rust_generate_trace_id()
+}
+
+/// Generate span ID (16 hex chars)
+#[napi]
+pub fn generate_span_id() -> String {
+    rust_generate_span_id()
+}
+
+/// Parse W3C traceparent header
+#[napi]
+pub fn parse_traceparent(header: String) -> Option<SpanContext> {
+    rust_parse_traceparent(&header).map(|ctx| SpanContext {
+        trace_id: ctx.trace_id,
+        span_id: ctx.span_id,
+        trace_flags: ctx.trace_flags as u32,
+    })
+}
+
+/// Format W3C traceparent header
+#[napi]
+pub fn format_traceparent(trace_id: String, span_id: String, trace_flags: u32) -> String {
+    let ctx = RustSpanContext {
+        trace_id,
+        span_id,
+        trace_flags: trace_flags as u8,
+        trace_state: None,
+    };
+    rust_format_traceparent(&ctx)
+}
+
+/// Tracer for creating spans
+#[napi]
+pub struct Tracer {
+    inner: Arc<RustTracer>,
+}
+
+#[napi]
+impl Tracer {
+    #[napi(constructor)]
+    pub fn new(service_name: String, sample_rate: Option<f64>) -> Self {
+        let config = RustTracerConfig::new(service_name);
+        let config = if let Some(rate) = sample_rate {
+            config.sample_rate(rate)
+        } else {
+            config
+        };
+
+        Self {
+            inner: Arc::new(RustTracer::new(config)),
+        }
+    }
+
+    /// Start a new span
+    #[napi]
+    pub fn start_span(&self, name: String) -> Span {
+        Span {
+            inner: Some(self.inner.start_span(name)),
+        }
+    }
+
+    /// Start a child span
+    #[napi]
+    pub fn start_child_span(&self, name: String, parent_trace_id: String, parent_span_id: String) -> Span {
+        let parent_ctx = RustSpanContext {
+            trace_id: parent_trace_id,
+            span_id: parent_span_id,
+            trace_flags: 1,
+            trace_state: None,
+        };
+        Span {
+            inner: Some(self.inner.start_child_span(name, &parent_ctx)),
+        }
+    }
+
+    /// Get pending span count
+    #[napi]
+    pub fn pending_count(&self) -> u32 {
+        self.inner.pending_count() as u32
+    }
+}
+
+/// A span representing a unit of work
+#[napi]
+pub struct Span {
+    inner: Option<RustSpan>,
+}
+
+#[napi]
+impl Span {
+    /// Get span context
+    #[napi]
+    pub fn context(&self) -> Option<SpanContext> {
+        self.inner.as_ref().map(|s| SpanContext {
+            trace_id: s.context.trace_id.clone(),
+            span_id: s.context.span_id.clone(),
+            trace_flags: s.context.trace_flags as u32,
+        })
+    }
+
+    /// Set attribute
+    #[napi]
+    pub fn set_attribute(&mut self, key: String, value: String) {
+        if let Some(ref mut span) = self.inner {
+            span.set_attribute(key, value);
+        }
+    }
+
+    /// Set numeric attribute
+    #[napi]
+    pub fn set_attribute_number(&mut self, key: String, value: f64) {
+        if let Some(ref mut span) = self.inner {
+            span.set_attribute(key, gust_core::middleware::otel::AttributeValue::Float(value));
+        }
+    }
+
+    /// End span
+    #[napi]
+    pub fn end(&mut self) {
+        if let Some(ref mut span) = self.inner {
+            span.end();
+        }
+    }
+
+    /// End span with status
+    #[napi]
+    pub fn end_with_status(&mut self, status: SpanStatus) {
+        if let Some(ref mut span) = self.inner {
+            let rust_status = match status {
+                SpanStatus::Unset => RustSpanStatus::Unset,
+                SpanStatus::Ok => RustSpanStatus::Ok,
+                SpanStatus::Error => RustSpanStatus::Error,
+            };
+            span.end_with_status(rust_status);
+        }
+    }
+
+    /// Get duration in milliseconds
+    #[napi]
+    pub fn duration_ms(&self) -> Option<f64> {
+        self.inner.as_ref().and_then(|s| s.duration_ms())
+    }
+}
+
+/// Metrics collector
+#[napi]
+pub struct MetricsCollector {
+    inner: Arc<RustMetricsCollector>,
+}
+
+#[napi]
+impl MetricsCollector {
+    #[napi(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RustMetricsCollector::new()),
+        }
+    }
+
+    /// Increment counter
+    #[napi]
+    pub fn counter_inc(&self, name: String) {
+        self.inner.counter(&name).inc();
+    }
+
+    /// Add to counter
+    #[napi]
+    pub fn counter_add(&self, name: String, value: i64) {
+        self.inner.counter(&name).add(value as u64);
+    }
+
+    /// Get counter value
+    #[napi]
+    pub fn counter_get(&self, name: String) -> i64 {
+        self.inner.counter(&name).get() as i64
+    }
+
+    /// Set gauge value
+    #[napi]
+    pub fn gauge_set(&self, name: String, value: f64) {
+        self.inner.gauge(&name).set(value);
+    }
+
+    /// Get gauge value
+    #[napi]
+    pub fn gauge_get(&self, name: String) -> f64 {
+        self.inner.gauge(&name).get()
+    }
+
+    /// Record histogram value
+    #[napi]
+    pub fn histogram_record(&self, name: String, value: f64) {
+        self.inner.histogram(&name).record(value);
+    }
+
+    /// Get histogram count
+    #[napi]
+    pub fn histogram_count(&self, name: String) -> i64 {
+        self.inner.histogram(&name).count() as i64
+    }
+
+    /// Get histogram sum
+    #[napi]
+    pub fn histogram_sum(&self, name: String) -> f64 {
+        self.inner.histogram(&name).sum()
+    }
+
+    /// Get histogram mean
+    #[napi]
+    pub fn histogram_mean(&self, name: String) -> f64 {
+        self.inner.histogram(&name).mean()
+    }
+
+    /// Get histogram percentile
+    #[napi]
+    pub fn histogram_percentile(&self, name: String, percentile: f64) -> f64 {
+        self.inner.histogram(&name).percentile(percentile)
+    }
+
+    /// Export metrics in Prometheus format
+    #[napi]
+    pub fn to_prometheus(&self) -> String {
+        self.inner.to_prometheus()
+    }
 }
 
 /// Pre-rendered static response
