@@ -2,16 +2,29 @@
  * Native Server Integration
  *
  * Transparently accelerates routes using Rust native HTTP server.
- * Falls back to pure JS (node:net + WASM) for edge/serverless environments.
+ * Falls back to WASM, then pure JS for edge/serverless environments.
  *
  * Performance: ~220k req/s consistent across all runtimes (Bun, Node.js, Deno)
  *
  * Architecture:
  * - Native (napi-rs): Primary backend, maximum performance
- * - Pure JS fallback: Edge/serverless environments (Cloudflare Workers, Vercel Edge, etc.)
+ * - WASM fallback: Edge/serverless environments with WASM support
+ * - Pure JS fallback: Environments without native or WASM support
  */
 
 import type { ServerResponse } from '@sylphx/gust-core'
+import {
+	wasmEncodeWebSocketBinary,
+	wasmEncodeWebSocketClose,
+	wasmEncodeWebSocketPing,
+	wasmEncodeWebSocketPong,
+	wasmEncodeWebSocketText,
+	wasmFormatTraceparent,
+	wasmGenerateSpanId,
+	wasmGenerateTraceId,
+	wasmGenerateWebSocketAccept,
+	wasmParseTraceparent,
+} from './wasm-loader'
 
 // ============================================================================
 // Native Middleware Configuration Types
@@ -1117,58 +1130,82 @@ export const nativeExtractProxyInfo = (
 
 /**
  * Generate a trace ID (32 hex chars) using native Rust implementation
+ * Falls back to WASM if native is not available.
  */
 export const nativeGenerateTraceId = (): string | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.generateTraceId) return null
-	try {
-		return binding.generateTraceId()
-	} catch {
-		return null
+	if (binding?.generateTraceId) {
+		try {
+			return binding.generateTraceId()
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	return wasmGenerateTraceId()
 }
 
 /**
  * Generate a span ID (16 hex chars) using native Rust implementation
+ * Falls back to WASM if native is not available.
  */
 export const nativeGenerateSpanId = (): string | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.generateSpanId) return null
-	try {
-		return binding.generateSpanId()
-	} catch {
-		return null
+	if (binding?.generateSpanId) {
+		try {
+			return binding.generateSpanId()
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	return wasmGenerateSpanId()
 }
 
 /**
  * Parse W3C traceparent header
+ * Falls back to WASM if native is not available.
  */
 export const nativeParseTraceparent = (header: string): NativeSpanContext | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.parseTraceparent) return null
-	try {
-		return binding.parseTraceparent(header)
-	} catch {
-		return null
+	if (binding?.parseTraceparent) {
+		try {
+			return binding.parseTraceparent(header)
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	return wasmParseTraceparent(header)
 }
 
 /**
  * Format W3C traceparent header
+ * Falls back to WASM if native is not available.
  */
 export const nativeFormatTraceparent = (
 	traceId: string,
 	spanId: string,
 	traceFlags: number
 ): string | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.formatTraceparent) return null
-	try {
-		return binding.formatTraceparent(traceId, spanId, traceFlags)
-	} catch {
-		return null
+	if (binding?.formatTraceparent) {
+		try {
+			return binding.formatTraceparent(traceId, spanId, traceFlags)
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	return wasmFormatTraceparent(traceId, spanId, traceFlags)
 }
 
 /**
@@ -1246,15 +1283,21 @@ export const nativeIsWebSocketUpgrade = (headers: Record<string, string>): boole
  * Generate WebSocket accept key from client's Sec-WebSocket-Key header
  *
  * Implements RFC 6455 key generation algorithm
+ * Falls back to WASM if native is not available.
  */
 export const nativeGenerateWebSocketAccept = (key: string): string | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.generateWebsocketAccept) return null
-	try {
-		return binding.generateWebsocketAccept(key)
-	} catch {
-		return null
+	if (binding?.generateWebsocketAccept) {
+		try {
+			return binding.generateWebsocketAccept(key)
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	return wasmGenerateWebSocketAccept(key)
 }
 
 /**
@@ -1320,29 +1363,45 @@ export const nativeParseWebSocketFrame = (data: number[] | Buffer): WebSocketPar
  * ```
  */
 export const nativeEncodeWebSocketText = (text: string, fin = true): Buffer | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.encodeWebsocketText) return null
-	try {
-		const arr = binding.encodeWebsocketText(text, fin)
-		return Buffer.from(arr)
-	} catch {
-		return null
+	if (binding?.encodeWebsocketText) {
+		try {
+			const arr = binding.encodeWebsocketText(text, fin)
+			return Buffer.from(arr)
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	const wasmResult = wasmEncodeWebSocketText(text, fin)
+	if (wasmResult) return Buffer.from(wasmResult)
+	return null
 }
 
 /**
  * Encode a WebSocket binary frame
+ * Falls back to WASM if native is not available.
  */
 export const nativeEncodeWebSocketBinary = (data: number[] | Buffer, fin = true): Buffer | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.encodeWebsocketBinary) return null
-	try {
-		const arr = Array.isArray(data) ? data : Array.from(data)
-		const result = binding.encodeWebsocketBinary(arr, fin)
-		return Buffer.from(result)
-	} catch {
-		return null
+	if (binding?.encodeWebsocketBinary) {
+		try {
+			const arr = Array.isArray(data) ? data : Array.from(data)
+			const result = binding.encodeWebsocketBinary(arr, fin)
+			return Buffer.from(result)
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	const uint8 = data instanceof Buffer ? new Uint8Array(data) : new Uint8Array(data)
+	const wasmResult = wasmEncodeWebSocketBinary(uint8, fin)
+	if (wasmResult) return Buffer.from(wasmResult)
+	return null
 }
 
 /**
@@ -1355,19 +1414,32 @@ export const nativeEncodeWebSocketBinary = (data: number[] | Buffer, fin = true)
  * ```
  */
 export const nativeEncodeWebSocketPing = (data?: number[] | Buffer): Buffer | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.encodeWebsocketPing) return null
-	try {
-		const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
-		const result = binding.encodeWebsocketPing(arr)
-		return Buffer.from(result)
-	} catch {
-		return null
+	if (binding?.encodeWebsocketPing) {
+		try {
+			const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
+			const result = binding.encodeWebsocketPing(arr)
+			return Buffer.from(result)
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	const uint8 = data
+		? data instanceof Buffer
+			? new Uint8Array(data)
+			: new Uint8Array(data)
+		: undefined
+	const wasmResult = wasmEncodeWebSocketPing(uint8)
+	if (wasmResult) return Buffer.from(wasmResult)
+	return null
 }
 
 /**
  * Encode a WebSocket pong frame (response to ping)
+ * Falls back to WASM if native is not available.
  *
  * @example
  * ```ts
@@ -1377,19 +1449,32 @@ export const nativeEncodeWebSocketPing = (data?: number[] | Buffer): Buffer | nu
  * ```
  */
 export const nativeEncodeWebSocketPong = (data?: number[] | Buffer): Buffer | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.encodeWebsocketPong) return null
-	try {
-		const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
-		const result = binding.encodeWebsocketPong(arr)
-		return Buffer.from(result)
-	} catch {
-		return null
+	if (binding?.encodeWebsocketPong) {
+		try {
+			const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
+			const result = binding.encodeWebsocketPong(arr)
+			return Buffer.from(result)
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	const uint8 = data
+		? data instanceof Buffer
+			? new Uint8Array(data)
+			: new Uint8Array(data)
+		: undefined
+	const wasmResult = wasmEncodeWebSocketPong(uint8)
+	if (wasmResult) return Buffer.from(wasmResult)
+	return null
 }
 
 /**
  * Encode a WebSocket close frame
+ * Falls back to WASM if native is not available.
  *
  * @param code - Close status code (1000 = normal, 1001 = going away, etc.)
  * @param reason - Optional UTF-8 close reason string
@@ -1401,14 +1486,21 @@ export const nativeEncodeWebSocketPong = (data?: number[] | Buffer): Buffer | nu
  * ```
  */
 export const nativeEncodeWebSocketClose = (code?: number, reason?: string): Buffer | null => {
+	// Try native first
 	const binding = loadNative()
-	if (!binding?.encodeWebsocketClose) return null
-	try {
-		const result = binding.encodeWebsocketClose(code, reason)
-		return Buffer.from(result)
-	} catch {
-		return null
+	if (binding?.encodeWebsocketClose) {
+		try {
+			const result = binding.encodeWebsocketClose(code, reason)
+			return Buffer.from(result)
+		} catch {
+			// Fall through to WASM
+		}
 	}
+
+	// Try WASM fallback
+	const wasmResult = wasmEncodeWebSocketClose(code, reason)
+	if (wasmResult) return Buffer.from(wasmResult)
+	return null
 }
 
 /**

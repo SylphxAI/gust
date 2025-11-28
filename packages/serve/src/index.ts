@@ -342,6 +342,8 @@ export {
 	validateQuery,
 	validateSchema,
 } from './validate'
+// WASM Fallback (for environments without native support)
+export { initWasm as initServeWasm, isWasmAvailable as isServeWasmAvailable } from './wasm-loader'
 export type {
 	WebSocketCloseInfo,
 	WebSocketEvents,
