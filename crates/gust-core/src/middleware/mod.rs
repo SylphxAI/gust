@@ -13,6 +13,11 @@ pub mod security;
 pub mod body_limit;
 pub mod cache;
 pub mod tracing;
+pub mod circuit_breaker;
+pub mod session;
+pub mod validate;
+pub mod range;
+pub mod proxy;
 
 // Re-exports for convenience
 pub use cors::{Cors, CorsConfig};
@@ -26,6 +31,11 @@ pub use security::{Security, SecurityConfig, FrameOptions, HstsConfig};
 pub use body_limit::{BodyLimit, BodyLimitConfig, format_size};
 pub use cache::{Cache, CacheConfig, CacheStore, MemoryCache, etag};
 pub use tracing::{Tracing, TracingConfig, IdGenerator, generate_uuid, generate_nano_id, generate_short_id};
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState, CircuitStats, Bulkhead, BulkheadConfig};
+pub use session::{Session, SessionConfig, SessionStore, MemoryStore as SessionMemoryStore, SessionData, SessionValue, SameSite as SessionSameSite};
+pub use validate::{Schema, SchemaType, StringFormat, ValidationError, ValidationResult, Value, ValidateConfig, validate};
+pub use range::{Range, ParsedRange, RangeConfig, RangeResponse, parse_range, content_range, get_mime_type, generate_etag};
+pub use proxy::{ProxyInfo, ProxyConfig, Protocol, TrustProxy, TrustedAddress, extract_proxy_info, parse_forwarded_for};
 
 use crate::{Request, Response};
 
