@@ -1,10 +1,12 @@
 //! WASM bindings for JavaScript interop
+//! Optimized for minimal allocations and fast JS interop
 
-use wasm_bindgen::prelude::*;
-use crate::parser::{self, Method, ParseState, Header, MAX_HEADERS};
+use crate::parser::{self, HeaderOffsets, MAX_HEADERS};
 use crate::router::Router as InnerRouter;
+use wasm_bindgen::prelude::*;
 
 /// WASM-exposed HTTP parser result
+/// Uses fixed-size array to avoid Vec allocation
 #[wasm_bindgen]
 pub struct ParseResult {
     /// 0 = incomplete, 1 = complete, 2 = error
@@ -23,100 +25,39 @@ pub struct ParseResult {
     pub headers_count: u32,
     /// Body start offset
     pub body_start: u32,
-    /// Header offsets: [name_start, name_end, value_start, value_end] * headers_count
-    header_offsets: Vec<u32>,
+    /// Fixed-size header offsets array
+    offsets: HeaderOffsets,
 }
 
 #[wasm_bindgen]
 impl ParseResult {
+    /// Get header offsets as a JS-compatible slice
+    /// Returns only the used portion to minimize data transfer
     #[wasm_bindgen(getter)]
     pub fn header_offsets(&self) -> Vec<u32> {
-        self.header_offsets.clone()
+        let count = (self.headers_count as usize) * 4;
+        self.offsets[..count].to_vec()
     }
 }
 
 /// Parse HTTP request from raw bytes
+/// Single-pass parsing with zero intermediate allocations
 #[wasm_bindgen]
 pub fn parse_http(buf: &[u8]) -> ParseResult {
-    let mut headers: [Header; MAX_HEADERS] = [Header { name: &[], value: &[] }; MAX_HEADERS];
-    let state = parser::parse_request(buf, &mut headers);
+    let mut offsets: HeaderOffsets = [0; MAX_HEADERS * 4];
+    let parsed = parser::parse_request(buf, &mut offsets);
 
-    let mut result = ParseResult {
-        state: match state {
-            ParseState::Incomplete => 0,
-            ParseState::Complete(_) => 1,
-            ParseState::Error => 2,
-        },
-        method: 0,
-        path_start: 0,
-        path_end: 0,
-        query_start: 0,
-        query_end: 0,
-        headers_count: 0,
-        body_start: 0,
-        header_offsets: Vec::new(),
-    };
-
-    if let ParseState::Complete(body_start) = state {
-        result.body_start = body_start as u32;
-
-        // Parse method
-        if let Some(space) = buf.iter().position(|&b| b == b' ') {
-            if let Some(method) = Method::parse(&buf[..space]) {
-                result.method = method as u8;
-            }
-
-            // Parse path
-            let path_start = space + 1;
-            let mut path_end = path_start;
-            let mut query_start = 0;
-            let mut query_end = 0;
-
-            for i in path_start..buf.len() {
-                match buf[i] {
-                    b' ' => {
-                        if query_start == 0 {
-                            path_end = i;
-                        } else {
-                            query_end = i;
-                        }
-                        break;
-                    }
-                    b'?' if query_start == 0 => {
-                        path_end = i;
-                        query_start = i + 1;
-                    }
-                    _ => {}
-                }
-            }
-
-            result.path_start = path_start as u32;
-            result.path_end = path_end as u32;
-            result.query_start = query_start as u32;
-            result.query_end = query_end as u32;
-        }
-
-        // Count headers and store offsets
-        for header in headers.iter() {
-            if header.name.is_empty() {
-                break;
-            }
-            result.headers_count += 1;
-
-            // Calculate offsets relative to buffer start
-            let name_start = header.name.as_ptr() as usize - buf.as_ptr() as usize;
-            let name_end = name_start + header.name.len();
-            let value_start = header.value.as_ptr() as usize - buf.as_ptr() as usize;
-            let value_end = value_start + header.value.len();
-
-            result.header_offsets.push(name_start as u32);
-            result.header_offsets.push(name_end as u32);
-            result.header_offsets.push(value_start as u32);
-            result.header_offsets.push(value_end as u32);
-        }
+    ParseResult {
+        state: parsed.state,
+        method: parsed.method as u8,
+        path_start: parsed.path_start,
+        path_end: parsed.path_end,
+        query_start: parsed.query_start,
+        query_end: parsed.query_end,
+        headers_count: parsed.headers_count,
+        body_start: parsed.body_start,
+        offsets,
     }
-
-    result
 }
 
 /// WASM-exposed Router
@@ -134,18 +75,20 @@ impl WasmRouter {
         }
     }
 
-    /// Insert a route (returns self for chaining)
+    /// Insert a route
     pub fn insert(&mut self, method: &str, path: &str, handler_id: u32) {
         self.inner.insert(method, path, handler_id);
     }
 
-    /// Find a route, returns handler_id or -1 if not found
+    /// Find a route, returns RouteMatch
     pub fn find(&self, method: &str, path: &str) -> RouteMatch {
         match self.inner.find(method, path) {
             Some(m) => RouteMatch {
                 found: true,
                 handler_id: m.handler_id,
-                params: m.params.into_iter()
+                params: m
+                    .params
+                    .into_iter()
                     .flat_map(|(k, v)| vec![k, v])
                     .collect(),
             },

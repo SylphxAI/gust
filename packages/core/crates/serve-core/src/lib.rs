@@ -11,5 +11,5 @@ mod wasm;
 #[cfg(feature = "wasm")]
 pub use wasm::*;
 
-pub use parser::{Header, Method, ParseState, MAX_HEADERS};
+pub use parser::{HeaderOffsets, Method, ParsedRequest, MAX_HEADERS};
 pub use router::{Match, Router};
