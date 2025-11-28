@@ -54,10 +54,10 @@ async function initWasmServer(): Promise<WasmCore> {
 
 	const __filename = fileURLToPath(import.meta.url)
 	const __dirname = dirname(__filename)
-	const wasmPath = join(__dirname, 'wasm', 'serve_core_bg.wasm')
+	const wasmPath = join(__dirname, 'wasm', 'gust_wasm_bg.wasm')
 
 	const wasmBuffer = await readFile(wasmPath)
-	const wasmModule = await import('./wasm/serve_core.js')
+	const wasmModule = await import('./wasm/gust_wasm.js')
 	wasmModule.initSync(wasmBuffer)
 
 	return {
@@ -71,10 +71,10 @@ async function initWasmServer(): Promise<WasmCore> {
  * Initialize WASM module for browser
  */
 async function initWasmBrowser(wasmUrl?: string): Promise<WasmCore> {
-	const wasmModule = await import('./wasm/serve_core.js')
+	const wasmModule = await import('./wasm/gust_wasm.js')
 
 	// Use default URL or provided URL
-	const url = wasmUrl || new URL('./wasm/serve_core_bg.wasm', import.meta.url).href
+	const url = wasmUrl || new URL('./wasm/gust_wasm_bg.wasm', import.meta.url).href
 
 	// Use streaming instantiation for better performance
 	await wasmModule.default(url)

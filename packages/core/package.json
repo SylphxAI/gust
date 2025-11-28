@@ -16,12 +16,12 @@
 			"default": "./dist/index.js"
 		},
 		"./wasm": {
-			"import": "./dist/wasm/serve_core.js",
-			"default": "./dist/wasm/serve_core.js"
+			"import": "./dist/wasm/gust_wasm.js",
+			"default": "./dist/wasm/gust_wasm.js"
 		}
 	},
 	"scripts": {
-		"build:wasm": "cd crates/serve-core && wasm-pack build --target web --release && cp -r pkg ../../src/wasm",
+		"build:wasm": "cd ../../crates/gust-wasm && wasm-pack build --target web --release --out-dir ../../packages/core/src/wasm",
 		"build": "bunup && cp -r src/wasm dist/",
 		"prepublishOnly": "bun run build"
 	},
