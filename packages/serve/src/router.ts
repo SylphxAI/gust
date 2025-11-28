@@ -169,24 +169,56 @@ const createUrlGenerators = <T extends Routes>(routes: T): UrlGenerator<T> => {
  *
  * @example
  * ```typescript
- * const home = get('/', () => json({ message: 'Home' }))
- * const user = get('/users/:id', (ctx) => {
- *   ctx.params.id  // ✅ string (type-safe!)
- *   return json({ id: ctx.params.id })
+ * // Basic usage
+ * const app = router({
+ *   home: get('/', () => json({ message: 'Home' })),
+ *   user: get('/users/:id', (ctx) => json({ id: ctx.params.id })),
  * })
  *
- * const app = router({ home, user })
+ * // With prefix - creates a sub-router
+ * const api = router('/api', {
+ *   health: get('/health', () => json({ status: 'ok' })),
+ *   users: get('/users', () => json([])),
+ * })
+ * // api.routes.health.path === '/api/health'
  *
- * app.url.home()              // ✅ () => string
- * app.url.user({ id: 42 })    // ✅ (params: { id: string | number }) => string
- * app.url.user()              // ❌ Error: Expected 1 argument
- * app.url.user({ foo: 1 })    // ❌ Error: 'foo' does not exist, expected 'id'
+ * // Compose routers by spreading
+ * const app = router({
+ *   home: get('/', handler),
+ *   ...api.routes,
+ * })
+ *
+ * // Type-safe URL generation
+ * app.url.home()              // "/"
+ * app.url.health()            // "/api/health"
+ * app.url.user({ id: 42 })    // "/users/42"
  * ```
  */
-export const router = <T extends Routes>(routes: T): Router<T> => {
+export function router<T extends Routes>(routes: T): Router<T>
+export function router<TPrefix extends string, T extends Routes>(
+	prefixPath: TPrefix,
+	routes: T
+): Router<{
+	[K in keyof T]: T[K] extends Route<infer M, infer P> ? Route<M, `${TPrefix}${P}`> : never
+}>
+export function router<T extends Routes>(prefixOrRoutes: string | T, maybeRoutes?: T): Router<T> {
+	const hasPrefix = typeof prefixOrRoutes === 'string'
+	const prefixPath = hasPrefix ? prefixOrRoutes : ''
+	const routes = (hasPrefix ? maybeRoutes : prefixOrRoutes) as T
+
+	// Apply prefix to all routes if provided
+	const prefixedRoutes = hasPrefix
+		? (Object.fromEntries(
+				Object.entries(routes).map(([name, route]) => [
+					name,
+					{ ...route, path: `${prefixPath}${route.path}` },
+				])
+			) as T)
+		: routes
+
 	let wasmRouter: WasmRouter | null = null
 	const handlers: Handler<Context>[] = []
-	const routeList = Object.values(routes)
+	const routeList = Object.values(prefixedRoutes)
 
 	const initRouter = () => {
 		if (wasmRouter) return wasmRouter
@@ -237,8 +269,8 @@ export const router = <T extends Routes>(routes: T): Router<T> => {
 
 	return {
 		handler,
-		routes,
-		url: createUrlGenerators(routes),
+		routes: prefixedRoutes,
+		url: createUrlGenerators(prefixedRoutes),
 	}
 }
 

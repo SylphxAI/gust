@@ -59,7 +59,54 @@ describe('Router', () => {
 		})
 	})
 
-	describe('route groups', () => {
+	describe('router with prefix', () => {
+		it('should create prefixed routes', () => {
+			const api = router('/api', {
+				health: get('/health', () => text('ok')),
+				users: get('/users', () => text('ok')),
+			})
+
+			expect(api.routes.health.path).toBe('/api/health')
+			expect(api.routes.users.path).toBe('/api/users')
+		})
+
+		it('should generate prefixed URLs', () => {
+			const api = router('/api', {
+				health: get('/health', () => text('ok')),
+				user: get('/users/:id', () => text('ok')),
+			})
+
+			expect(api.url.health()).toBe('/api/health')
+			expect(api.url.user({ id: 42 })).toBe('/api/users/42')
+		})
+
+		it('should compose with spread', () => {
+			const api = router('/api', {
+				health: get('/health', () => text('ok')),
+			})
+
+			const app = router({
+				home: get('/', () => text('home')),
+				...api.routes,
+			})
+
+			expect(app.routes.home.path).toBe('/')
+			expect(app.routes.health.path).toBe('/api/health')
+			expect(app.url.home()).toBe('/')
+			expect(app.url.health()).toBe('/api/health')
+		})
+
+		it('should work without prefix', () => {
+			const app = router({
+				health: get('/health', () => text('ok')),
+			})
+
+			expect(app.routes.health.path).toBe('/health')
+			expect(app.url.health()).toBe('/health')
+		})
+	})
+
+	describe('route groups (legacy)', () => {
 		it('should prefix routes with spread operator', () => {
 			const routes = group(
 				'/api',
