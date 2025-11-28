@@ -56,22 +56,16 @@ export type RouteAccessor<TMethod extends string, TPath extends string> = UrlFn<
 }
 
 /** Router accessors - each route is callable with path/method properties */
-export type RouterAccessors<T> = {
-	[K in keyof T]: T[K] extends Route<infer M, infer P>
-		? RouteAccessor<M, P>
-		: T[K] extends Router<infer R>
-			? RouterAccessors<R>
-			: never
+export type RouterAccessors<T extends Routes> = {
+	[K in keyof T]: T[K] extends Route<infer M, infer P> ? RouteAccessor<M, P> : never
 }
 
-export type Router<T> = {
+export type Router<T extends Routes> = {
 	readonly handler: Handler<Context>
-	readonly _isRouter: true // marker for detection
 } & RouterAccessors<T>
 
-/** Input to router() - can be Route or nested Router */
-// biome-ignore lint/suspicious/noExplicitAny: Recursive type requires any
-export type RoutesInput = Record<string, Route<string, string> | Router<any>>
+/** Input to router() - named routes */
+export type RoutesInput = Record<string, Route<string, string>>
 
 // ============================================================================
 // Route Helpers
@@ -155,10 +149,6 @@ export const all = <TPath extends string>(
 // URL Generation
 // ============================================================================
 
-/** Check if value is a Router (input) */
-const isRouterInput = (value: unknown): value is Router<RoutesInput> =>
-	typeof value === 'object' && value !== null && '_isRouter' in value && value._isRouter === true
-
 const generateUrl = (path: string, params?: Record<string, string | number>): string => {
 	if (!params) return path
 	return path.replace(/:([^/]+)/g, (_, key) => {
@@ -180,42 +170,10 @@ const createRouteAccessor = (route: Route): RouteAccessor<string, string> => {
 /** Create router accessors - callable routes with path/method properties */
 const createRouterAccessors = <T extends RoutesInput>(routes: T): RouterAccessors<T> => {
 	const accessors = {} as RouterAccessors<T>
-	for (const [name, value] of Object.entries(routes)) {
-		if (isRouterInput(value)) {
-			// Nested router - copy its accessors (excluding handler and _isRouter)
-			const nestedAccessors = {} as Record<string, unknown>
-			for (const key of Object.keys(value)) {
-				if (key !== 'handler' && key !== '_isRouter') {
-					nestedAccessors[key] = (value as Record<string, unknown>)[key]
-				}
-			}
-			;(accessors as Record<string, unknown>)[name] = nestedAccessors
-		} else {
-			// Regular route - create callable accessor
-			;(accessors as Record<string, unknown>)[name] = createRouteAccessor(value as Route)
-		}
+	for (const [name, route] of Object.entries(routes)) {
+		;(accessors as Record<string, unknown>)[name] = createRouteAccessor(route)
 	}
 	return accessors
-}
-
-/** Store to keep original routes with handlers for WASM registration */
-const routerOriginalRoutes = new WeakMap<object, RoutesInput>()
-
-/** Recursively flatten routes for WASM router registration */
-const flattenRoutesForWasm = (input: RoutesInput): Route[] => {
-	const result: Route[] = []
-	for (const value of Object.values(input)) {
-		if (isRouterInput(value)) {
-			// Nested router - get original routes from WeakMap
-			const originalRoutes = routerOriginalRoutes.get(value)
-			if (originalRoutes) {
-				result.push(...flattenRoutesForWasm(originalRoutes))
-			}
-		} else {
-			result.push(value as Route)
-		}
-	}
-	return result
 }
 
 // ============================================================================
@@ -246,46 +204,28 @@ const flattenRoutesForWasm = (input: RoutesInput): Route[] => {
  * app.home.method         // "GET"
  * app.user.path           // "/users/:id"
  *
- * // Nested routers
- * const member = router({
- *   home: get('/', () => text('member home')),
- *   profile: get('/profile', () => text('profile')),
- * })
- * const app = router({
- *   login: get('/login', () => text('login')),
- *   member,
- * })
- * app.login()             // "/login"
- * app.member.home()       // "/"
- * app.member.profile()    // "/profile"
- *
  * // With prefix
  * const api = router('/api', {
  *   health: get('/health', () => json({ status: 'ok' })),
  * })
  * api.health()            // "/api/health"
  * api.health.path         // "/api/health"
+ *
+ * // Using prefix() helper for grouping
+ * const userRoutes = prefix('/users', {
+ *   list: get('/', listHandler),
+ *   show: get('/:id', showHandler),
+ * })
+ * const app = router({ home: get('/', homeHandler), ...userRoutes })
  * ```
  */
-/** Apply prefix to routes (including nested routers) */
+/** Apply prefix to routes */
 const applyPrefix = <T extends RoutesInput>(prefixStr: string, routes: T): T => {
 	const result = {} as T
-	for (const [name, value] of Object.entries(routes)) {
-		if (isRouterInput(value)) {
-			// Nested router - get original routes and apply prefix
-			const originalRoutes = routerOriginalRoutes.get(value)
-			if (originalRoutes) {
-				const prefixedRoutes = applyPrefix(prefixStr, originalRoutes)
-				// Create new router with prefixed routes (recursively)
-				;(result as Record<string, unknown>)[name] = createRouterFromRoutes(prefixedRoutes)
-			}
-		} else {
-			// Regular route - apply prefix to path
-			const route = value as Route
-			;(result as Record<string, unknown>)[name] = {
-				...route,
-				path: `${prefixStr}${route.path}`,
-			}
+	for (const [name, route] of Object.entries(routes)) {
+		;(result as Record<string, unknown>)[name] = {
+			...route,
+			path: `${prefixStr}${route.path}`,
 		}
 	}
 	return result
@@ -344,25 +284,14 @@ const createHandler = (flatRouteList: Route[]): Handler<Context> => {
 	}
 }
 
-/** Internal: Create router from routes (used for nested routers with prefix) */
+/** Internal: Create router from routes */
 const createRouterFromRoutes = <T extends RoutesInput>(routes: T): Router<T> => {
-	// Store original routes for later WASM registration
-	const routerObj = {} as Router<T>
-	routerOriginalRoutes.set(routerObj, routes)
-
-	// Flatten for WASM router
-	const flatRouteList = flattenRoutesForWasm(routes)
-
-	// Create accessors (callable with path/method properties)
+	const routeList = Object.values(routes)
 	const accessors = createRouterAccessors(routes)
 
-	// Build router object
-	Object.assign(routerObj, accessors, {
-		handler: createHandler(flatRouteList),
-		_isRouter: true as const,
+	return Object.assign({} as Router<T>, accessors, {
+		handler: createHandler(routeList),
 	})
-
-	return routerObj
 }
 
 export function router<T extends RoutesInput>(routes: T): Router<T>
@@ -370,15 +299,7 @@ export function router<TPrefix extends string, T extends RoutesInput>(
 	prefixPath: TPrefix,
 	routes: T
 ): Router<{
-	[K in keyof T]: T[K] extends Route<infer M, infer P>
-		? Route<M, `${TPrefix}${P}`>
-		: T[K] extends Router<infer R>
-			? Router<{
-					[RK in keyof R]: R[RK] extends Route<infer RM, infer RP>
-						? Route<RM, `${TPrefix}${RP}`>
-						: R[RK]
-				}>
-			: never
+	[K in keyof T]: T[K] extends Route<infer M, infer P> ? Route<M, `${TPrefix}${P}`> : never
 }>
 export function router<T extends RoutesInput>(
 	prefixOrRoutes: string | T,
@@ -388,7 +309,7 @@ export function router<T extends RoutesInput>(
 	const prefixPath = hasPrefix ? prefixOrRoutes : ''
 	const inputRoutes = (hasPrefix ? maybeRoutes : prefixOrRoutes) as T
 
-	// Apply prefix if provided (preserves structure)
+	// Apply prefix if provided
 	const routes = hasPrefix ? applyPrefix(prefixPath, inputRoutes) : inputRoutes
 
 	return createRouterFromRoutes(routes)

@@ -90,89 +90,6 @@ describe('Router', () => {
 		})
 	})
 
-	describe('nested routers', () => {
-		it('should preserve nested structure', () => {
-			const home = get('/', () => text('hi'))
-			const help = get('/help', () => text('help'))
-			const member = router({ home, help })
-
-			const login = get('/login', () => text('login'))
-			const app = router({ login, member })
-
-			// Structure is preserved - accessors follow nested structure
-			expect(app.login.path).toBe('/login')
-			expect(app.member.home.path).toBe('/')
-			expect(app.member.help.path).toBe('/help')
-		})
-
-		it('should generate URLs preserving structure', () => {
-			const home = get('/', () => text('hi'))
-			const help = get('/help', () => text('help'))
-			const member = router({ home, help })
-
-			const login = get('/login', () => text('login'))
-			const app = router({ login, member })
-
-			// URL generators follow structure (callable)
-			expect(app.login()).toBe('/login')
-			expect(app.member.home()).toBe('/')
-			expect(app.member.help()).toBe('/help')
-		})
-
-		it('should work with prefixed nested routers', () => {
-			const health = get('/health', () => text('ok'))
-			const users = get('/users', () => text('users'))
-			const api = router('/api', { health, users })
-
-			const home = get('/', () => text('home'))
-			const app = router({ home, api })
-
-			expect(app.home.path).toBe('/')
-			expect(app.api.health.path).toBe('/api/health')
-			expect(app.api.users.path).toBe('/api/users')
-
-			expect(app.home()).toBe('/')
-			expect(app.api.health()).toBe('/api/health')
-			expect(app.api.users()).toBe('/api/users')
-		})
-
-		it('should work with multiple nested routers', () => {
-			const health = get('/health', () => text('ok'))
-			const api = router('/api', { health })
-
-			const login = get('/login', () => text('login'))
-			const auth = router('/auth', { login })
-
-			const home = get('/', () => text('home'))
-			const app = router({ home, api, auth })
-
-			expect(app.home.path).toBe('/')
-			expect(app.api.health.path).toBe('/api/health')
-			expect(app.auth.login.path).toBe('/auth/login')
-
-			expect(app.api.health()).toBe('/api/health')
-			expect(app.auth.login()).toBe('/auth/login')
-		})
-
-		it('should deeply nest routers', () => {
-			const item = get('/item', () => text('item'))
-			const inner = router({ item })
-
-			const list = get('/list', () => text('list'))
-			const middle = router('/mid', { list, inner })
-
-			const home = get('/', () => text('home'))
-			const app = router({ home, middle })
-
-			expect(app.home.path).toBe('/')
-			expect(app.middle.list.path).toBe('/mid/list')
-			expect(app.middle.inner.item.path).toBe('/mid/item')
-
-			expect(app.middle.list()).toBe('/mid/list')
-			expect(app.middle.inner.item()).toBe('/mid/item')
-		})
-	})
-
 	describe('route groups (legacy)', () => {
 		it('should prefix routes with spread operator', () => {
 			const routes = group(
@@ -474,7 +391,6 @@ describe('Router', () => {
 			const app = router({ home, about })
 
 			expect(app).toHaveProperty('handler')
-			expect(app).toHaveProperty('_isRouter')
 			expect(typeof app.handler).toBe('function')
 		})
 

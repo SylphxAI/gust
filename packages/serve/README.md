@@ -387,22 +387,14 @@ app.post({ userId: 1, postId: 99 })     // "/users/1/posts/99"
 app.user.path                           // "/users/:id"
 app.user.method                         // "GET"
 
-// Nested routers
-const member = router({
-  home: get('/', () => text('member home')),
-  profile: get('/profile', () => text('profile')),
+// Route grouping with prefix()
+const userRoutes = prefix('/users', {
+  list: get('/', listHandler),
+  show: get('/:id', showHandler),
 })
-const mainApp = router({
-  login: get('/login', () => text('login')),
-  member,
-})
-mainApp.login()             // "/login"
-mainApp.member.home()       // "/"
-mainApp.member.profile()    // "/profile"
-
-// Route composition
-const apiRoutes = prefix('/api', { user, post: postRoute })
-const allRoutes = merge(apiRoutes, otherRoutes)
+const allRoutes = merge({ home: get('/', homeHandler) }, userRoutes)
+// allRoutes.list.path → "/users"
+// allRoutes.show.path → "/users/:id"
 ```
 
 ## License
