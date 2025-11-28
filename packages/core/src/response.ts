@@ -3,11 +3,28 @@
  * Immutable response objects
  */
 
+/**
+ * Response body type
+ * - string | Buffer: Buffered response (sent all at once)
+ * - AsyncIterable<Uint8Array>: Streaming response (sent chunk by chunk)
+ * - null: No body
+ */
+export type ResponseBody = string | Buffer | AsyncIterable<Uint8Array> | null
+
 export type ServerResponse = {
 	readonly status: number
 	readonly headers: Readonly<Record<string, string>>
-	readonly body: string | Buffer | null
+	readonly body: ResponseBody
 }
+
+/**
+ * Check if body is a streaming response (AsyncIterable)
+ */
+export const isStreamingBody = (body: ResponseBody): body is AsyncIterable<Uint8Array> =>
+	body !== null &&
+	typeof body === 'object' &&
+	!Buffer.isBuffer(body) &&
+	Symbol.asyncIterator in body
 
 // Response constructors
 export const response = (

@@ -136,8 +136,9 @@ const createHttp2Context = async (
 
 /**
  * Send HTTP/2 response
+ * Supports both buffered and streaming (AsyncIterable) bodies
  */
-const sendResponse = (stream: ServerHttp2Stream, response: ServerResponse): void => {
+const sendResponse = async (stream: ServerHttp2Stream, response: ServerResponse): Promise<void> => {
 	if (stream.destroyed || stream.closed) return
 
 	const headers: Record<string, string | number> = {
@@ -149,20 +150,41 @@ const sendResponse = (stream: ServerHttp2Stream, response: ServerResponse): void
 		headers[key.toLowerCase()] = value
 	}
 
-	// Add content-length if body exists
-	if (response.body !== null) {
-		const bodyLen =
-			typeof response.body === 'string' ? Buffer.byteLength(response.body) : response.body.length
-		headers[HTTP2_HEADER_CONTENT_LENGTH] = bodyLen
-	}
+	// Check if body is streaming (AsyncIterable)
+	const isStreaming =
+		response.body !== null &&
+		typeof response.body === 'object' &&
+		Symbol.asyncIterator in response.body
 
-	// Send response
-	stream.respond(headers)
+	if (isStreaming) {
+		// Streaming response - no content-length
+		stream.respond(headers)
 
-	if (response.body !== null) {
-		stream.end(response.body)
+		try {
+			for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+				if (stream.destroyed || stream.closed) break
+				stream.write(chunk)
+			}
+		} catch {
+			// Stream error
+		} finally {
+			stream.end()
+		}
 	} else {
-		stream.end()
+		// Buffered response - add content-length
+		if (response.body !== null) {
+			const body = response.body as string | Buffer
+			const bodyLen = typeof body === 'string' ? Buffer.byteLength(body) : body.length
+			headers[HTTP2_HEADER_CONTENT_LENGTH] = bodyLen
+		}
+
+		stream.respond(headers)
+
+		if (response.body !== null) {
+			stream.end(response.body as string | Buffer)
+		} else {
+			stream.end()
+		}
 	}
 }
 

@@ -423,11 +423,16 @@ export const otel = (options: OtelOptions): Wrapper<Context> => {
 
 				// Record response
 				span.attributes['http.status_code'] = res.status
-				span.attributes['http.response_content_length'] = res.body
-					? typeof res.body === 'string'
-						? res.body.length
-						: res.body.length
-					: 0
+				// Content length is unknown for streaming responses
+				const isStreaming =
+					res.body !== null && typeof res.body === 'object' && Symbol.asyncIterator in res.body
+				span.attributes['http.response_content_length'] = isStreaming
+					? -1 // Unknown for streaming
+					: res.body
+						? typeof res.body === 'string'
+							? res.body.length
+							: (res.body as Buffer).length
+						: 0
 
 				// Capture response headers
 				for (const header of captureResponseHeadersLower) {

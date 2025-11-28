@@ -5,6 +5,7 @@
 
 export type {
 	Handler,
+	ResponseBody,
 	ServerResponse,
 	Wrapper,
 } from '@sylphx/gust-core'
@@ -18,6 +19,8 @@ export {
 	html,
 	// WASM (advanced)
 	initWasm,
+	// Streaming
+	isStreamingBody,
 	isWasmReady,
 	json,
 	notFound,
@@ -269,9 +272,19 @@ export {
 	MemoryStore,
 	session,
 } from './session'
-export type { SSEMessage } from './sse'
+export type { SSEEvent, SSEMessage } from './sse'
 // Server-Sent Events
-export { createSSE, formatSSE, SSEClient, sseHeaders } from './sse'
+export {
+	createSSE,
+	formatSSE,
+	formatSSEEvent,
+	SSEClient,
+	sse,
+	sseEvent,
+	sseHeaders,
+	sseStream,
+	textStream,
+} from './sse'
 export type { StaticOptions } from './static'
 // Static file serving
 export { serveStatic } from './static'
@@ -279,10 +292,15 @@ export { serveStatic } from './static'
 export {
 	createJsonStream,
 	createStream,
+	ndjsonStream,
+	nodeStreamToAsyncIterable,
 	pipeStream,
 	StreamWriter,
+	stream,
+	streamFile,
 	streamFrom,
 	streamGenerator,
+	streamText,
 } from './stream'
 export type { LogFn, LoggingOptions, TracingOptions } from './tracing'
 // Request ID / Tracing
@@ -322,13 +340,22 @@ export {
 	validateQuery,
 	validateSchema,
 } from './validate'
-export type { WebSocketEvents, WebSocketHandler, WebSocketMessage } from './websocket'
+export type {
+	WebSocketCloseInfo,
+	WebSocketEvents,
+	WebSocketHandler,
+	WebSocketMessage,
+	WebSocketSession,
+	WebSocketSessionHandler,
+} from './websocket'
 // WebSocket
 export {
 	createHandshakeResponse,
+	createWebSocketSession,
 	generateAcceptKey,
 	isWebSocketUpgrade,
 	upgradeToWebSocket,
 	WebSocket,
 	websocket,
+	websocketSession,
 } from './websocket'

@@ -172,3 +172,127 @@ export const formatSSE = (msg: SSEMessage): string => {
 
 	return message
 }
+
+// =============================================================================
+// Pure AsyncIterable-based SSE helpers (for ServerResponse streaming)
+// =============================================================================
+
+import type { ServerResponse } from '@sylphx/gust-core'
+
+/**
+ * SSE event data for streaming
+ */
+export type SSEEvent = {
+	readonly data: unknown
+	readonly id?: string | number
+	readonly event?: string
+	readonly retry?: number
+}
+
+/**
+ * Format a single SSE event
+ */
+export const formatSSEEvent = (event: SSEEvent): string => {
+	let result = ''
+
+	if (event.id !== undefined) {
+		result += `id: ${event.id}\n`
+	}
+
+	if (event.event !== undefined) {
+		result += `event: ${event.event}\n`
+	}
+
+	if (event.retry !== undefined) {
+		result += `retry: ${event.retry}\n`
+	}
+
+	const data = typeof event.data === 'string' ? event.data : JSON.stringify(event.data)
+
+	// Handle multi-line data
+	for (const line of data.split('\n')) {
+		result += `data: ${line}\n`
+	}
+
+	result += '\n'
+	return result
+}
+
+/**
+ * Simple SSE event helper (just data, optional id)
+ */
+export const sseEvent = (data: unknown, id?: string | number): string => {
+	return formatSSEEvent({ data, id })
+}
+
+/**
+ * Transform string generator to Uint8Array generator
+ */
+export async function* textStream(
+	source: AsyncIterable<string> | (() => AsyncGenerator<string>)
+): AsyncIterable<Uint8Array> {
+	const encoder = new TextEncoder()
+	const iterable = typeof source === 'function' ? source() : source
+
+	for await (const text of iterable) {
+		yield encoder.encode(text)
+	}
+}
+
+/**
+ * Create an SSE streaming response
+ *
+ * @example
+ * ```ts
+ * const handler = async (ctx) => {
+ *   return sse(() => textStream(async function* () {
+ *     yield sseEvent({ message: 'hello' }, 1)
+ *     yield sseEvent({ message: 'world' }, 2)
+ *   }))
+ * }
+ * ```
+ */
+export const sse = (
+	source: AsyncIterable<Uint8Array> | (() => AsyncGenerator<Uint8Array>),
+	init?: { status?: number; headers?: Record<string, string> }
+): ServerResponse => ({
+	status: init?.status ?? 200,
+	headers: {
+		'content-type': 'text/event-stream',
+		'cache-control': 'no-cache',
+		connection: 'keep-alive',
+		'x-accel-buffering': 'no', // Disable nginx buffering
+		...init?.headers,
+	},
+	body: typeof source === 'function' ? source() : source,
+})
+
+/**
+ * Create an SSE response from event generator
+ *
+ * @example
+ * ```ts
+ * const handler = async (ctx) => {
+ *   return sseStream(async function* () {
+ *     yield { data: 'hello' }
+ *     yield { data: 'world', id: 1 }
+ *     yield { data: { json: true }, event: 'update' }
+ *   })
+ * }
+ * ```
+ */
+export const sseStream = (
+	source: AsyncIterable<SSEEvent> | (() => AsyncGenerator<SSEEvent>),
+	init?: { status?: number; headers?: Record<string, string> }
+): ServerResponse => {
+	const iterable = typeof source === 'function' ? source() : source
+
+	async function* generate(): AsyncGenerator<Uint8Array> {
+		const encoder = new TextEncoder()
+		for await (const event of iterable) {
+			yield encoder.encode(formatSSEEvent(event))
+		}
+	}
+
+	return sse(generate(), init)
+}

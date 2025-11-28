@@ -313,3 +313,167 @@ export const websocket = (
 		handler: handler,
 	}
 }
+
+// =============================================================================
+// Pure WebSocketSession API (AsyncIterable-based)
+// =============================================================================
+
+/**
+ * WebSocket close info
+ */
+export type WebSocketCloseInfo = {
+	readonly code: number
+	readonly reason: string
+}
+
+/**
+ * Pure WebSocket session with AsyncIterable messages
+ * - messages: AsyncIterable for incoming messages
+ * - send: Function to send messages
+ * - close: Function to close connection
+ * - closed: Promise that resolves when connection closes
+ */
+export type WebSocketSession = {
+	readonly messages: AsyncIterable<WebSocketMessage>
+	readonly send: (data: string | Buffer) => void
+	readonly ping: (data?: Buffer) => void
+	readonly close: (code?: number, reason?: string) => void
+	readonly closed: Promise<WebSocketCloseInfo>
+	readonly isOpen: boolean
+}
+
+/**
+ * Session-based WebSocket handler
+ */
+export type WebSocketSessionHandler = (
+	session: WebSocketSession,
+	headers: Record<string, string>
+) => Promise<void>
+
+/**
+ * Create AsyncIterable from WebSocket messages
+ */
+const createMessageIterable = (ws: WebSocket): AsyncIterable<WebSocketMessage> => {
+	return {
+		[Symbol.asyncIterator](): AsyncIterator<WebSocketMessage> {
+			const queue: WebSocketMessage[] = []
+			const waiters: Array<{
+				resolve: (result: IteratorResult<WebSocketMessage>) => void
+				reject: (error: Error) => void
+			}> = []
+			let closed = false
+			let closeError: Error | null = null
+
+			// Handle incoming messages
+			ws.on('message', (msg: WebSocketMessage) => {
+				const waiter = waiters.shift()
+				if (waiter) {
+					waiter.resolve({ value: msg, done: false })
+				} else {
+					queue.push(msg)
+				}
+			})
+
+			// Handle close
+			ws.on('close', () => {
+				closed = true
+				// Resolve all waiting iterators
+				for (const waiter of waiters) {
+					waiter.resolve({ value: undefined as unknown as WebSocketMessage, done: true })
+				}
+				waiters.length = 0
+			})
+
+			// Handle error
+			ws.on('error', (err: Error) => {
+				closed = true
+				closeError = err
+				// Reject all waiting iterators
+				for (const waiter of waiters) {
+					waiter.reject(err)
+				}
+				waiters.length = 0
+			})
+
+			return {
+				next(): Promise<IteratorResult<WebSocketMessage>> {
+					// If there are queued messages, return immediately
+					const queued = queue.shift()
+					if (queued !== undefined) {
+						return Promise.resolve({ value: queued, done: false })
+					}
+
+					// If closed, return done
+					if (closed) {
+						if (closeError) {
+							return Promise.reject(closeError)
+						}
+						return Promise.resolve({ value: undefined as unknown as WebSocketMessage, done: true })
+					}
+
+					// Wait for next message
+					return new Promise((resolve, reject) => {
+						waiters.push({ resolve, reject })
+					})
+				},
+			}
+		},
+	}
+}
+
+/**
+ * Create a WebSocket session from raw WebSocket
+ */
+export const createWebSocketSession = (ws: WebSocket): WebSocketSession => {
+	let closeResolve: ((info: WebSocketCloseInfo) => void) | null = null
+
+	const closedPromise = new Promise<WebSocketCloseInfo>((resolve) => {
+		closeResolve = resolve
+	})
+
+	ws.on('close', (code: number, reason: string) => {
+		closeResolve?.({ code, reason })
+	})
+
+	return {
+		messages: createMessageIterable(ws),
+		send: (data: string | Buffer) => ws.send(data),
+		ping: (data?: Buffer) => ws.ping(data),
+		close: (code?: number, reason?: string) => ws.close(code, reason),
+		closed: closedPromise,
+		get isOpen() {
+			return ws.isOpen
+		},
+	}
+}
+
+/**
+ * Create a session-based WebSocket route handler
+ *
+ * @example
+ * ```ts
+ * const echo = websocketSession(async (session) => {
+ *   for await (const msg of session.messages) {
+ *     session.send(`Echo: ${msg.data}`)
+ *   }
+ *   // Loop exits when connection closes
+ *   const { code, reason } = await session.closed
+ *   console.log(`Closed: ${code} ${reason}`)
+ * })
+ * ```
+ */
+export const websocketSession = (
+	handler: WebSocketSessionHandler
+): { isWebSocket: true; handler: WebSocketHandler } => {
+	return {
+		isWebSocket: true as const,
+		handler: (ws: WebSocket, headers: Record<string, string>) => {
+			const session = createWebSocketSession(ws)
+			// Fire and forget - handler runs asynchronously
+			handler(session, headers).catch((err) => {
+				console.error('WebSocket session error:', err)
+				ws.close(1011, 'Internal Error')
+			})
+		},
+	}
+}

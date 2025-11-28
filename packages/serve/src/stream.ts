@@ -233,3 +233,144 @@ const getStatusText = (status: number): string => {
 	}
 	return texts[status] || 'Unknown'
 }
+
+// =============================================================================
+// Pure AsyncIterable-based streaming helpers (for ServerResponse)
+// =============================================================================
+
+import type { ServerResponse } from '@sylphx/gust-core'
+
+/**
+ * Create a generic streaming response
+ *
+ * @example
+ * ```ts
+ * const handler = async (ctx) => {
+ *   return stream(async function* () {
+ *     yield new TextEncoder().encode('chunk 1')
+ *     yield new TextEncoder().encode('chunk 2')
+ *   })
+ * }
+ * ```
+ */
+export const stream = (
+	source: AsyncIterable<Uint8Array> | (() => AsyncGenerator<Uint8Array>),
+	init?: { status?: number; headers?: Record<string, string> }
+): ServerResponse => ({
+	status: init?.status ?? 200,
+	headers: init?.headers ?? {},
+	body: typeof source === 'function' ? source() : source,
+})
+
+/**
+ * Create a streaming response from text generator
+ *
+ * @example
+ * ```ts
+ * const handler = async (ctx) => {
+ *   return streamText(async function* () {
+ *     yield 'Hello '
+ *     yield 'World!'
+ *   })
+ * }
+ * ```
+ */
+export const streamText = (
+	source: AsyncIterable<string> | (() => AsyncGenerator<string>),
+	init?: { status?: number; headers?: Record<string, string> }
+): ServerResponse => {
+	const iterable = typeof source === 'function' ? source() : source
+
+	async function* generate(): AsyncGenerator<Uint8Array> {
+		const encoder = new TextEncoder()
+		for await (const text of iterable) {
+			yield encoder.encode(text)
+		}
+	}
+
+	return {
+		status: init?.status ?? 200,
+		headers: {
+			'content-type': 'text/plain; charset=utf-8',
+			...init?.headers,
+		},
+		body: generate(),
+	}
+}
+
+/**
+ * Create a newline-delimited JSON (NDJSON) streaming response
+ *
+ * @example
+ * ```ts
+ * const handler = async (ctx) => {
+ *   return ndjsonStream(async function* () {
+ *     yield { id: 1, name: 'Alice' }
+ *     yield { id: 2, name: 'Bob' }
+ *   })
+ * }
+ * ```
+ */
+export const ndjsonStream = <T>(
+	source: AsyncIterable<T> | (() => AsyncGenerator<T>),
+	init?: { status?: number; headers?: Record<string, string> }
+): ServerResponse => {
+	const iterable = typeof source === 'function' ? source() : source
+
+	async function* generate(): AsyncGenerator<Uint8Array> {
+		const encoder = new TextEncoder()
+		for await (const item of iterable) {
+			yield encoder.encode(`${JSON.stringify(item)}\n`)
+		}
+	}
+
+	return {
+		status: init?.status ?? 200,
+		headers: {
+			'content-type': 'application/x-ndjson',
+			...init?.headers,
+		},
+		body: generate(),
+	}
+}
+
+/**
+ * Convert Node.js readable stream to AsyncIterable
+ */
+export async function* nodeStreamToAsyncIterable(
+	readable: NodeJS.ReadableStream
+): AsyncIterable<Uint8Array> {
+	for await (const chunk of readable) {
+		if (chunk instanceof Buffer) {
+			yield new Uint8Array(chunk)
+		} else if (chunk instanceof Uint8Array) {
+			yield chunk
+		} else if (typeof chunk === 'string') {
+			yield new TextEncoder().encode(chunk)
+		}
+	}
+}
+
+/**
+ * Stream a file using AsyncIterable
+ *
+ * @example
+ * ```ts
+ * import { createReadStream } from 'node:fs'
+ *
+ * const handler = async (ctx) => {
+ *   return streamFile(createReadStream('/path/to/file'))
+ * }
+ * ```
+ */
+export const streamFile = (
+	readable: NodeJS.ReadableStream,
+	init?: { status?: number; headers?: Record<string, string> }
+): ServerResponse => ({
+	status: init?.status ?? 200,
+	headers: {
+		'content-type': 'application/octet-stream',
+		...init?.headers,
+	},
+	body: nodeStreamToAsyncIterable(readable),
+})

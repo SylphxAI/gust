@@ -129,6 +129,11 @@ export const compress = (options: CompressionOptions = {}): Wrapper<Context> => 
 				return response
 			}
 
+			// Skip if body is streaming (AsyncIterable)
+			if (typeof response.body === 'object' && Symbol.asyncIterator in response.body) {
+				return response
+			}
+
 			// Skip if already encoded
 			if (response.headers['content-encoding']) {
 				return response
@@ -140,8 +145,8 @@ export const compress = (options: CompressionOptions = {}): Wrapper<Context> => 
 				return response
 			}
 
-			// Get body as buffer
-			const bodyBuffer = Buffer.from(response.body)
+			// Get body as buffer (only for buffered responses)
+			const bodyBuffer = Buffer.from(response.body as string | Buffer)
 
 			// Skip if below threshold
 			if (bodyBuffer.length < threshold) {

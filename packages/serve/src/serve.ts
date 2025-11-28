@@ -7,7 +7,7 @@
 import { createServer, type Server as NetServer, type Socket } from 'node:net'
 import { createServer as createTlsServer, type TLSSocket, type Server as TlsServer } from 'node:tls'
 import type { Handler, ServerResponse, WasmCore } from '@sylphx/gust-core'
-import { getWasm, initWasm, serverError } from '@sylphx/gust-core'
+import { getWasm, initWasm, isStreamingBody, serverError } from '@sylphx/gust-core'
 import type { Context } from './context'
 import { createContext, parseHeaders } from './context'
 
@@ -319,7 +319,7 @@ const handleConnection = (
 				const response = await handler(ctx)
 				clearRequestTimeout()
 				state.isProcessing = false
-				sendResponse(socket, response, shouldClose)
+				await sendResponse(socket, response, shouldClose)
 
 				if (shouldClose) {
 					clearTimers()
@@ -332,7 +332,7 @@ const handleConnection = (
 			} catch (error) {
 				config.onError?.(error as Error)
 				clearTimers()
-				sendResponse(socket, serverError(), true)
+				await sendResponse(socket, serverError(), true)
 				socket.end()
 				return
 			}
@@ -351,8 +351,13 @@ const handleConnection = (
 
 /**
  * Send HTTP response with optional keep-alive
+ * Supports both buffered and streaming (AsyncIterable) bodies
  */
-const sendResponse = (socket: Socket, response: ServerResponse, shouldClose: boolean): void => {
+const sendResponse = async (
+	socket: Socket | TLSSocket,
+	response: ServerResponse,
+	shouldClose: boolean
+): Promise<void> => {
 	const statusText = getStatusText(response.status)
 	let head = `HTTP/1.1 ${response.status} ${statusText}\r\n`
 
@@ -361,23 +366,54 @@ const sendResponse = (socket: Socket, response: ServerResponse, shouldClose: boo
 		head += `${key}: ${value}\r\n`
 	}
 
-	// Add content-length if body exists
-	if (response.body !== null) {
-		const bodyLen = Buffer.byteLength(response.body)
-		head += `content-length: ${bodyLen}\r\n`
+	// Check if body is streaming (AsyncIterable)
+	if (isStreamingBody(response.body)) {
+		// Streaming response - use chunked transfer encoding
+		head += 'transfer-encoding: chunked\r\n'
+		head += `connection: ${shouldClose ? 'close' : 'keep-alive'}\r\n`
+		head += '\r\n'
+
+		socket.write(head)
+
+		// Stream chunks with backpressure handling
+		try {
+			for await (const chunk of response.body) {
+				if (!socket.writable) break
+
+				// Write chunk in chunked encoding format: size\r\n + data + \r\n
+				const sizeHex = chunk.length.toString(16)
+				const canWrite = socket.write(`${sizeHex}\r\n`)
+				socket.write(chunk)
+				socket.write('\r\n')
+
+				// Handle backpressure
+				if (!canWrite) {
+					await new Promise<void>((resolve) => socket.once('drain', resolve))
+				}
+			}
+
+			// Send terminating chunk
+			socket.write('0\r\n\r\n')
+		} catch {
+			// Stream error - close connection
+			socket.destroy()
+		}
 	} else {
-		head += 'content-length: 0\r\n'
-	}
+		// Buffered response - use content-length
+		if (response.body !== null) {
+			const bodyLen = Buffer.byteLength(response.body)
+			head += `content-length: ${bodyLen}\r\n`
+		} else {
+			head += 'content-length: 0\r\n'
+		}
 
-	// Add Connection header
-	head += `connection: ${shouldClose ? 'close' : 'keep-alive'}\r\n`
+		head += `connection: ${shouldClose ? 'close' : 'keep-alive'}\r\n`
+		head += '\r\n'
 
-	head += '\r\n'
-
-	// Write response
-	socket.write(head)
-	if (response.body !== null) {
-		socket.write(response.body)
+		socket.write(head)
+		if (response.body !== null) {
+			socket.write(response.body)
+		}
 	}
 }
 

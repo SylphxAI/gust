@@ -417,14 +417,18 @@ export const etag = (): Wrapper<Context> => {
 		return async (ctx: Context): Promise<ServerResponse> => {
 			const res = await handler(ctx)
 
-			// Skip if no body or already has ETag
-			if (!res.body || res.headers.etag) {
+			// Skip if no body, already has ETag, or body is streaming
+			if (
+				!res.body ||
+				res.headers.etag ||
+				(typeof res.body === 'object' && Symbol.asyncIterator in res.body)
+			) {
 				return res
 			}
 
-			// Generate ETag from body
+			// Generate ETag from body (only for buffered responses)
 			const hash = createHash('md5')
-				.update(typeof res.body === 'string' ? res.body : res.body)
+				.update(typeof res.body === 'string' ? res.body : (res.body as Buffer))
 				.digest('hex')
 			const etagValue = `"${hash}"`
 
