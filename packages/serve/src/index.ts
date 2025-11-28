@@ -192,6 +192,27 @@ export {
 	verifyJwt,
 } from './jwt'
 export type {
+	NativeBinding,
+	NativeServeOptions,
+	NativeServer,
+	NativeServerHandle,
+	StaticRouteConfig,
+} from './native'
+// Native acceleration (optional)
+export {
+	canBeStatic,
+	extractStaticRoute,
+	getBestBackend,
+	getNativeLoadError,
+	isIoUringAvailable,
+	isNativeAvailable,
+	loadNativeBinding,
+	nativeServe,
+	staticGet,
+	staticPost,
+	staticRoute,
+} from './native'
+export type {
 	Counter,
 	Gauge,
 	Histogram,

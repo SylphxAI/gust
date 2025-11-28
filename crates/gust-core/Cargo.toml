@@ -1,0 +1,42 @@
+[package]
+name = "gust-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core HTTP server library - shared between WASM and Native"
+
+[features]
+default = []
+# WASM target - excludes native-only dependencies
+wasm = []
+# Native target - includes tokio, hyper, etc.
+native = ["dep:tokio", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:socket2", "dep:num_cpus", "dep:parking_lot", "dep:libc"]
+# TLS support (native only)
+tls = ["native", "dep:rustls", "dep:tokio-rustls", "dep:rustls-pemfile", "dep:webpki-roots"]
+# io_uring support (Linux only)
+io_uring = ["native"]
+
+[dependencies]
+# Core (always included)
+bytes.workspace = true
+smallvec.workspace = true
+matchit.workspace = true
+thiserror.workspace = true
+http.workspace = true
+bumpalo.workspace = true
+
+# Native-only dependencies
+tokio = { workspace = true, optional = true, features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "fs"] }
+hyper = { workspace = true, optional = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, optional = true, features = ["tokio"] }
+http-body-util = { workspace = true, optional = true }
+socket2 = { workspace = true, optional = true }
+num_cpus = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
+libc = { workspace = true, optional = true }
+
+# TLS dependencies
+rustls = { workspace = true, optional = true, features = ["ring"] }
+tokio-rustls = { workspace = true, optional = true }
+rustls-pemfile = { workspace = true, optional = true }
+webpki-roots = { workspace = true, optional = true }

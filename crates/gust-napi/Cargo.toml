@@ -1,0 +1,37 @@
+[package]
+name = "gust-napi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native Node.js bindings for gust-core via napi-rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = []
+# Enable TLS support
+tls = ["gust-core/tls"]
+# Enable io_uring on Linux
+io_uring = ["gust-core/io_uring", "dep:tokio-uring"]
+
+[dependencies]
+gust-core = { workspace = true, features = ["native"] }
+napi.workspace = true
+napi-derive.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "macros", "sync"] }
+mimalloc.workspace = true
+# Also need direct access to these for native server
+hyper = { workspace = true, features = ["server", "http1"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+http-body-util.workspace = true
+bytes.workspace = true
+smallvec.workspace = true
+num_cpus.workspace = true
+
+# io_uring support (Linux only)
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-uring = { version = "0.5", optional = true }
+
+[build-dependencies]
+napi-build = "2"
