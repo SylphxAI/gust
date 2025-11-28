@@ -1,11 +1,13 @@
 /**
  * Request ID and Tracing
  * Generate unique request IDs for logging and tracing
+ *
+ * Uses native Rust/WASM implementation when available.
  */
 
-import { randomBytes } from 'node:crypto'
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
 import type { Context } from './context'
+import { nativeGenerateSpanId, nativeGenerateTraceId } from './native'
 
 export type TracingOptions = {
 	/** Header name for request ID (default: x-request-id) */
@@ -19,48 +21,67 @@ export type TracingOptions = {
 }
 
 /**
- * Generate default request ID (16 bytes hex)
+ * Generate default request ID (32 hex chars)
+ * Uses native Rust/WASM implementation.
  */
 const defaultGenerator = (): string => {
-	return randomBytes(16).toString('hex')
+	const native = nativeGenerateTraceId()
+	if (native) return native
+	// Fallback should not happen - native/WASM always available
+	throw new Error('Native trace ID generation unavailable')
 }
 
 /**
  * Generate UUID v4
+ * Uses native random bytes with UUID v4 formatting.
  */
 export const generateUUID = (): string => {
-	const bytes = randomBytes(16)
-	// Set version 4
-	bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40
-	// Set variant
-	bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80
+	// Use trace ID (32 hex = 16 bytes) and format as UUID v4
+	const hex = nativeGenerateTraceId()
+	if (!hex) throw new Error('Native trace ID generation unavailable')
 
-	const hex = bytes.toString('hex')
+	// Format as UUID v4: set version (4) and variant bits
+	const chars = hex.split('')
+	chars[12] = '4' // version 4
+	chars[16] = '89ab'[parseInt(chars[16] ?? '0', 16) & 0x3] ?? '8' // variant
+
 	return [
-		hex.slice(0, 8),
-		hex.slice(8, 12),
-		hex.slice(12, 16),
-		hex.slice(16, 20),
-		hex.slice(20, 32),
+		chars.slice(0, 8).join(''),
+		chars.slice(8, 12).join(''),
+		chars.slice(12, 16).join(''),
+		chars.slice(16, 20).join(''),
+		chars.slice(20, 32).join(''),
 	].join('-')
 }
 
 /**
- * Generate short ID (8 chars)
+ * Generate short ID (8 hex chars)
+ * Uses native span ID generation.
  */
 export const generateShortId = (): string => {
-	return randomBytes(4).toString('hex')
+	const spanId = nativeGenerateSpanId()
+	if (!spanId) throw new Error('Native span ID generation unavailable')
+	return spanId.slice(0, 8)
 }
 
 /**
  * Generate nanoid-style ID
+ * Uses native random with base62 encoding.
  */
 export const generateNanoId = (size = 21): string => {
 	const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-	const bytes = randomBytes(size)
+	// Generate enough trace IDs to cover the size (each trace ID = 32 hex = 16 bytes)
+	let hex = ''
+	while (hex.length < size * 2) {
+		const traceId = nativeGenerateTraceId()
+		if (!traceId) throw new Error('Native trace ID generation unavailable')
+		hex += traceId
+	}
+
 	let id = ''
 	for (let i = 0; i < size; i++) {
-		id += alphabet[(bytes[i] ?? 0) % alphabet.length]
+		const byte = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+		id += alphabet[byte % alphabet.length]
 	}
 	return id
 }

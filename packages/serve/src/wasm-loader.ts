@@ -3,8 +3,12 @@
  *
  * Loads and initializes the gust-wasm module.
  * Used as a fallback when native (napi) is not available.
+ * Auto-initializes synchronously on first use.
  */
 
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type * as WasmTypes from './wasm/gust_wasm'
 
 // WASM module state
@@ -13,11 +17,67 @@ let wasmLoadAttempted = false
 let wasmLoadError: Error | null = null
 
 /**
- * Initialize the WASM module
- * Must be called before using any WASM functions
+ * Get the directory of this module
+ */
+const getModuleDir = (): string => {
+	try {
+		// ESM
+		return dirname(fileURLToPath(import.meta.url))
+	} catch {
+		// CJS fallback
+		return __dirname
+	}
+}
+
+/**
+ * Initialize WASM synchronously (for use in sync functions)
+ * This is called automatically on first use.
+ */
+const initWasmSync = (): boolean => {
+	if (wasmLoadAttempted) return wasmModule !== null
+	wasmLoadAttempted = true
+
+	try {
+		// Load WASM module synchronously
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
+		const wasm = require('./wasm/gust_wasm') as typeof WasmTypes & {
+			initSync?: (input: { module: ArrayBuffer | ArrayBufferView }) => void
+		}
+
+		// Try to initialize synchronously if available
+		if (typeof wasm.initSync === 'function') {
+			try {
+				const wasmPath = join(getModuleDir(), 'wasm', 'gust_wasm_bg.wasm')
+				const wasmBytes = readFileSync(wasmPath)
+				wasm.initSync({ module: wasmBytes })
+			} catch {
+				// initSync may already be called or not needed
+			}
+		}
+
+		// Seed the RNG with current timestamp
+		if (wasm.seed_rng) {
+			wasm.seed_rng(BigInt(Date.now()))
+		}
+
+		wasmModule = wasm
+		return true
+	} catch (e) {
+		wasmLoadError = e as Error
+		return false
+	}
+}
+
+/**
+ * Initialize the WASM module (async version)
+ * For explicit initialization before use.
  */
 export const initWasm = async (): Promise<boolean> => {
 	if (wasmLoadAttempted) return wasmModule !== null
+
+	// Try sync init first
+	if (initWasmSync()) return true
+
 	wasmLoadAttempted = true
 
 	try {
@@ -43,10 +103,20 @@ export const initWasm = async (): Promise<boolean> => {
 }
 
 /**
+ * Ensure WASM is initialized (lazy sync init)
+ */
+const ensureWasm = (): typeof WasmTypes | null => {
+	if (!wasmModule && !wasmLoadAttempted) {
+		initWasmSync()
+	}
+	return wasmModule
+}
+
+/**
  * Check if WASM is available
  */
 export const isWasmAvailable = (): boolean => {
-	return wasmModule !== null
+	return ensureWasm() !== null
 }
 
 /**
@@ -60,20 +130,21 @@ export const getWasmLoadError = (): Error | null => {
  * Get the loaded WASM module
  */
 export const getWasmModule = (): typeof WasmTypes | null => {
-	return wasmModule
+	return ensureWasm()
 }
 
 // ============================================================================
-// WASM Function Wrappers
+// WASM Function Wrappers (auto-initialize on first use)
 // ============================================================================
 
 /**
  * Generate WebSocket accept key using WASM
  */
 export const wasmGenerateWebSocketAccept = (key: string): string | null => {
-	if (!wasmModule?.generate_websocket_accept) return null
+	const wasm = ensureWasm()
+	if (!wasm?.generate_websocket_accept) return null
 	try {
-		return wasmModule.generate_websocket_accept(key)
+		return wasm.generate_websocket_accept(key)
 	} catch {
 		return null
 	}
@@ -83,9 +154,10 @@ export const wasmGenerateWebSocketAccept = (key: string): string | null => {
  * Encode WebSocket text frame using WASM
  */
 export const wasmEncodeWebSocketText = (text: string, fin = true): Uint8Array | null => {
-	if (!wasmModule?.encode_websocket_text) return null
+	const wasm = ensureWasm()
+	if (!wasm?.encode_websocket_text) return null
 	try {
-		return wasmModule.encode_websocket_text(text, fin)
+		return wasm.encode_websocket_text(text, fin)
 	} catch {
 		return null
 	}
@@ -95,9 +167,10 @@ export const wasmEncodeWebSocketText = (text: string, fin = true): Uint8Array | 
  * Encode WebSocket binary frame using WASM
  */
 export const wasmEncodeWebSocketBinary = (data: Uint8Array, fin = true): Uint8Array | null => {
-	if (!wasmModule?.encode_websocket_binary) return null
+	const wasm = ensureWasm()
+	if (!wasm?.encode_websocket_binary) return null
 	try {
-		return wasmModule.encode_websocket_binary(data, fin)
+		return wasm.encode_websocket_binary(data, fin)
 	} catch {
 		return null
 	}
@@ -107,9 +180,10 @@ export const wasmEncodeWebSocketBinary = (data: Uint8Array, fin = true): Uint8Ar
  * Encode WebSocket ping frame using WASM
  */
 export const wasmEncodeWebSocketPing = (data?: Uint8Array): Uint8Array | null => {
-	if (!wasmModule?.encode_websocket_ping) return null
+	const wasm = ensureWasm()
+	if (!wasm?.encode_websocket_ping) return null
 	try {
-		return wasmModule.encode_websocket_ping(data ?? new Uint8Array(0))
+		return wasm.encode_websocket_ping(data ?? new Uint8Array(0))
 	} catch {
 		return null
 	}
@@ -119,9 +193,10 @@ export const wasmEncodeWebSocketPing = (data?: Uint8Array): Uint8Array | null =>
  * Encode WebSocket pong frame using WASM
  */
 export const wasmEncodeWebSocketPong = (data?: Uint8Array): Uint8Array | null => {
-	if (!wasmModule?.encode_websocket_pong) return null
+	const wasm = ensureWasm()
+	if (!wasm?.encode_websocket_pong) return null
 	try {
-		return wasmModule.encode_websocket_pong(data ?? new Uint8Array(0))
+		return wasm.encode_websocket_pong(data ?? new Uint8Array(0))
 	} catch {
 		return null
 	}
@@ -131,9 +206,10 @@ export const wasmEncodeWebSocketPong = (data?: Uint8Array): Uint8Array | null =>
  * Encode WebSocket close frame using WASM
  */
 export const wasmEncodeWebSocketClose = (code?: number, reason?: string): Uint8Array | null => {
-	if (!wasmModule?.encode_websocket_close) return null
+	const wasm = ensureWasm()
+	if (!wasm?.encode_websocket_close) return null
 	try {
-		return wasmModule.encode_websocket_close(code, reason)
+		return wasm.encode_websocket_close(code, reason)
 	} catch {
 		return null
 	}
@@ -143,9 +219,10 @@ export const wasmEncodeWebSocketClose = (code?: number, reason?: string): Uint8A
  * Parse WebSocket frame using WASM
  */
 export const wasmParseWebSocketFrame = (data: Uint8Array): WasmTypes.WsFrameResult | null => {
-	if (!wasmModule?.parse_websocket_frame) return null
+	const wasm = ensureWasm()
+	if (!wasm?.parse_websocket_frame) return null
 	try {
-		return wasmModule.parse_websocket_frame(data)
+		return wasm.parse_websocket_frame(data)
 	} catch {
 		return null
 	}
@@ -155,9 +232,10 @@ export const wasmParseWebSocketFrame = (data: Uint8Array): WasmTypes.WsFrameResu
  * Generate trace ID using WASM
  */
 export const wasmGenerateTraceId = (): string | null => {
-	if (!wasmModule?.generate_trace_id) return null
+	const wasm = ensureWasm()
+	if (!wasm?.generate_trace_id) return null
 	try {
-		return wasmModule.generate_trace_id()
+		return wasm.generate_trace_id()
 	} catch {
 		return null
 	}
@@ -167,9 +245,10 @@ export const wasmGenerateTraceId = (): string | null => {
  * Generate span ID using WASM
  */
 export const wasmGenerateSpanId = (): string | null => {
-	if (!wasmModule?.generate_span_id) return null
+	const wasm = ensureWasm()
+	if (!wasm?.generate_span_id) return null
 	try {
-		return wasmModule.generate_span_id()
+		return wasm.generate_span_id()
 	} catch {
 		return null
 	}
@@ -181,9 +260,10 @@ export const wasmGenerateSpanId = (): string | null => {
 export const wasmParseTraceparent = (
 	header: string
 ): { traceId: string; spanId: string; traceFlags: number } | null => {
-	if (!wasmModule?.parse_traceparent) return null
+	const wasm = ensureWasm()
+	if (!wasm?.parse_traceparent) return null
 	try {
-		const result = wasmModule.parse_traceparent(header)
+		const result = wasm.parse_traceparent(header)
 		if (!result) return null
 		return {
 			traceId: result.trace_id,
@@ -203,9 +283,10 @@ export const wasmFormatTraceparent = (
 	spanId: string,
 	traceFlags: number
 ): string | null => {
-	if (!wasmModule?.format_traceparent) return null
+	const wasm = ensureWasm()
+	if (!wasm?.format_traceparent) return null
 	try {
-		return wasmModule.format_traceparent(traceId, spanId, traceFlags)
+		return wasm.format_traceparent(traceId, spanId, traceFlags)
 	} catch {
 		return null
 	}
@@ -220,9 +301,10 @@ export const wasmValidateString = (
 	maxLength?: number,
 	format?: string
 ): { valid: boolean; errors: string[] } | null => {
-	if (!wasmModule?.validate_string) return null
+	const wasm = ensureWasm()
+	if (!wasm?.validate_string) return null
 	try {
-		const result = wasmModule.validate_string(value, minLength, maxLength, format)
+		const result = wasm.validate_string(value, minLength, maxLength, format)
 		return {
 			valid: result.valid,
 			errors: Array.from(result.errors),
@@ -241,9 +323,10 @@ export const wasmValidateNumber = (
 	max?: number,
 	isInteger = false
 ): { valid: boolean; errors: string[] } | null => {
-	if (!wasmModule?.validate_number) return null
+	const wasm = ensureWasm()
+	if (!wasm?.validate_number) return null
 	try {
-		const result = wasmModule.validate_number(value, min, max, isInteger)
+		const result = wasm.validate_number(value, min, max, isInteger)
 		return {
 			valid: result.valid,
 			errors: Array.from(result.errors),
@@ -257,9 +340,10 @@ export const wasmValidateNumber = (
  * Parse HTTP request using WASM
  */
 export const wasmParseHttp = (data: Uint8Array): WasmTypes.ParseResult | null => {
-	if (!wasmModule?.parse_http) return null
+	const wasm = ensureWasm()
+	if (!wasm?.parse_http) return null
 	try {
-		return wasmModule.parse_http(data)
+		return wasm.parse_http(data)
 	} catch {
 		return null
 	}
@@ -269,9 +353,10 @@ export const wasmParseHttp = (data: Uint8Array): WasmTypes.ParseResult | null =>
  * Create WASM router
  */
 export const wasmCreateRouter = (): WasmTypes.WasmRouter | null => {
-	if (!wasmModule?.WasmRouter) return null
+	const wasm = ensureWasm()
+	if (!wasm?.WasmRouter) return null
 	try {
-		return new wasmModule.WasmRouter()
+		return new wasm.WasmRouter()
 	} catch {
 		return null
 	}
