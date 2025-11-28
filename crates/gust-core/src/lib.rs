@@ -16,6 +16,7 @@ pub mod request;
 pub mod response;
 pub mod router;
 pub mod middleware;
+pub mod handlers;
 
 #[cfg(feature = "native")]
 pub mod server;
@@ -31,6 +32,14 @@ pub use router::{Router, RouteMatch};
 
 // Middleware re-exports
 pub use middleware::{Middleware, MiddlewareChain};
+
+// Handlers re-exports
+pub use handlers::{
+    WebSocket, WebSocketMessage, WebSocketHandler,
+    Sse, SseEvent, SseStream,
+    StaticFiles, StaticFileConfig,
+    Health, HealthCheck, HealthStatus,
+};
 
 #[cfg(feature = "native")]
 pub use server::{ServerConfig, ServerState, StaticRoute, DynamicHandler};

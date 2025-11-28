@@ -171,8 +171,8 @@ mod tests {
     #[test]
     fn test_dynamic_routes() {
         let mut router: Router<&str> = Router::new();
-        router.get("/users/:id", "get_user").unwrap();
-        router.get("/users/:id/posts/:post_id", "get_post").unwrap();
+        router.get("/users/{id}", "get_user").unwrap();
+        router.get("/users/{id}/posts/{post_id}", "get_post").unwrap();
 
         let m = router.match_route(Method::Get, "/users/123").unwrap();
         assert_eq!(m.value, "get_user");
@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn test_wildcard_routes() {
         let mut router: Router<&str> = Router::new();
-        router.get("/files/*path", "serve_file").unwrap();
+        router.get("/files/{*path}", "serve_file").unwrap();
 
         let m = router.match_route(Method::Get, "/files/docs/readme.md").unwrap();
         assert_eq!(m.value, "serve_file");

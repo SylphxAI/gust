@@ -125,7 +125,7 @@ impl MemoryStore {
     }
 
     #[cfg(feature = "native")]
-    fn read_entries(&self) -> parking_lot::RwLockReadGuard<HashMap<String, RateLimitEntry>> {
+    fn read_entries(&self) -> parking_lot::RwLockReadGuard<'_, HashMap<String, RateLimitEntry>> {
         self.entries.read()
     }
 
@@ -135,7 +135,7 @@ impl MemoryStore {
     }
 
     #[cfg(feature = "native")]
-    fn write_entries(&self) -> parking_lot::RwLockWriteGuard<HashMap<String, RateLimitEntry>> {
+    fn write_entries(&self) -> parking_lot::RwLockWriteGuard<'_, HashMap<String, RateLimitEntry>> {
         self.entries.write()
     }
 
@@ -336,18 +336,18 @@ mod tests {
         let store = MemoryStore::new();
         let config = RateLimitConfig::new(5, Duration::from_secs(60));
 
-        // First request should be allowed
+        // First request should be allowed - no entry exists yet
         let result = store.check("test", &config);
         assert!(result.allowed);
-        assert_eq!(result.remaining, 4);
+        assert_eq!(result.remaining, 4); // max - 1 for anticipated request
 
-        // Increment and check
+        // Increment creates entry with count=1
         store.increment("test", &config);
         let result = store.check("test", &config);
         assert!(result.allowed);
-        assert_eq!(result.remaining, 3);
+        assert_eq!(result.remaining, 4); // 5 - 1 = 4 remaining
 
-        // Exhaust limit
+        // Exhaust limit (need 4 more increments to reach 5)
         for _ in 0..4 {
             store.increment("test", &config);
         }

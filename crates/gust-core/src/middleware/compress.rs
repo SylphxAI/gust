@@ -48,6 +48,7 @@ pub enum CompressionLevel {
 }
 
 impl CompressionLevel {
+    #[cfg_attr(not(feature = "compress"), allow(dead_code))]
     fn gzip_level(&self) -> u32 {
         match self {
             CompressionLevel::Fast => 1,
@@ -56,6 +57,7 @@ impl CompressionLevel {
         }
     }
 
+    #[cfg_attr(not(feature = "compress"), allow(dead_code))]
     fn brotli_level(&self) -> u32 {
         match self {
             CompressionLevel::Fast => 1,

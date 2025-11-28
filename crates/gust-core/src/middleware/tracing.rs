@@ -196,9 +196,9 @@ impl Middleware for Tracing {
         // Log response
         if self.config.log_responses {
             let id = req.params.get("_request_id").map(|s| s.as_str()).unwrap_or("-");
-            let duration = req.params.get("_request_start").and_then(|s| {
-                // Parse the Instant from string (hacky but works for logging)
-                None::<f64> // Would need proper duration tracking
+            let duration = req.params.get("_request_start").and_then(|_| {
+                // Would need proper duration tracking - placeholder for now
+                None::<f64>
             }).unwrap_or(0.0);
 
             eprintln!("[{}] {} {} -> {} ({:.2}ms)", id, req.method.as_str(), req.path, res.status.0, duration);

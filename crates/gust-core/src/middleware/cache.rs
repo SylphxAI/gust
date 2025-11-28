@@ -128,7 +128,7 @@ impl MemoryCache {
     }
 
     #[cfg(feature = "native")]
-    fn read_entries(&self) -> parking_lot::RwLockReadGuard<HashMap<String, CacheEntry>> {
+    fn read_entries(&self) -> parking_lot::RwLockReadGuard<'_, HashMap<String, CacheEntry>> {
         self.entries.read()
     }
 
@@ -138,7 +138,7 @@ impl MemoryCache {
     }
 
     #[cfg(feature = "native")]
-    fn write_entries(&self) -> parking_lot::RwLockWriteGuard<HashMap<String, CacheEntry>> {
+    fn write_entries(&self) -> parking_lot::RwLockWriteGuard<'_, HashMap<String, CacheEntry>> {
         self.entries.write()
     }
 
@@ -327,7 +327,7 @@ mod tests {
         let entry = CacheEntry {
             response: CachedResponse {
                 status: 200,
-                headers: vec![],
+                headers: SmallVec::new(),
                 body: bytes::Bytes::from("test"),
             },
             created_at: Instant::now(),
