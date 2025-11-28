@@ -106,6 +106,78 @@ describe('Router', () => {
 		})
 	})
 
+	describe('nested routers', () => {
+		it('should flatten nested routers', () => {
+			const home = get('/', () => text('hi'))
+			const help = get('/help', () => text('help'))
+			const member = router({ home, help })
+
+			const login = get('/login', () => text('login'))
+			const app = router({ login, member })
+
+			// Should have all routes flattened
+			expect(app.routes.login.path).toBe('/login')
+			expect(app.routes.home.path).toBe('/')
+			expect(app.routes.help.path).toBe('/help')
+		})
+
+		it('should generate URLs for nested routes', () => {
+			const home = get('/', () => text('hi'))
+			const help = get('/help', () => text('help'))
+			const member = router({ home, help })
+
+			const login = get('/login', () => text('login'))
+			const app = router({ login, member })
+
+			expect(app.url.login()).toBe('/login')
+			expect(app.url.home()).toBe('/')
+			expect(app.url.help()).toBe('/help')
+		})
+
+		it('should work with prefixed nested routers', () => {
+			const health = get('/health', () => text('ok'))
+			const users = get('/users', () => text('users'))
+			const api = router('/api', { health, users })
+
+			const home = get('/', () => text('home'))
+			const app = router({ home, api })
+
+			expect(app.routes.home.path).toBe('/')
+			expect(app.routes.health.path).toBe('/api/health')
+			expect(app.routes.users.path).toBe('/api/users')
+		})
+
+		it('should work with multiple nested routers', () => {
+			const health = get('/health', () => text('ok'))
+			const api = router('/api', { health })
+
+			const login = get('/login', () => text('login'))
+			const auth = router('/auth', { login })
+
+			const home = get('/', () => text('home'))
+			const app = router({ home, api, auth })
+
+			expect(app.routes.home.path).toBe('/')
+			expect(app.routes.health.path).toBe('/api/health')
+			expect(app.routes.login.path).toBe('/auth/login')
+		})
+
+		it('should deeply nest routers', () => {
+			const item = get('/item', () => text('item'))
+			const inner = router({ item })
+
+			const list = get('/list', () => text('list'))
+			const middle = router('/mid', { list, inner })
+
+			const home = get('/', () => text('home'))
+			const app = router({ home, middle })
+
+			expect(app.routes.home.path).toBe('/')
+			expect(app.routes.list.path).toBe('/mid/list')
+			expect(app.routes.item.path).toBe('/mid/item')
+		})
+	})
+
 	describe('route groups (legacy)', () => {
 		it('should prefix routes with spread operator', () => {
 			const routes = group(
