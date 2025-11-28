@@ -193,21 +193,33 @@ export {
 } from './jwt'
 export type {
 	NativeBinding,
+	NativeCompressionConfig,
+	NativeCorsConfig,
+	NativeRateLimitConfig,
+	NativeSecurityConfig,
 	NativeServeOptions,
 	NativeServer,
+	NativeServerConfig,
 	NativeServerHandle,
+	NativeServeWithConfigOptions,
 	StaticRouteConfig,
 } from './native'
 // Native acceleration (optional)
 export {
 	canBeStatic,
+	corsPermissive,
+	createNativeServer,
+	createNativeServerWithConfig,
 	extractStaticRoute,
 	getBestBackend,
+	getCpuCount,
 	getNativeLoadError,
 	isIoUringAvailable,
 	isNativeAvailable,
 	loadNativeBinding,
 	nativeServe,
+	nativeServeWithConfig,
+	securityStrict,
 	staticGet,
 	staticPost,
 	staticRoute,

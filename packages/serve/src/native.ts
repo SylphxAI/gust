@@ -13,10 +13,90 @@
 
 import type { ServerResponse } from '@sylphx/gust-core'
 
+// ============================================================================
+// Native Middleware Configuration Types
+// ============================================================================
+
+/** CORS configuration for native server */
+export interface NativeCorsConfig {
+	/** Allowed origins (use "*" for any, or specify domains) */
+	origins?: string[]
+	/** Allowed HTTP methods */
+	methods?: string[]
+	/** Allowed headers */
+	allowedHeaders?: string[]
+	/** Exposed headers */
+	exposedHeaders?: string[]
+	/** Allow credentials */
+	credentials?: boolean
+	/** Max age in seconds */
+	maxAge?: number
+}
+
+/** Rate limiting configuration for native server */
+export interface NativeRateLimitConfig {
+	/** Maximum requests per window */
+	maxRequests: number
+	/** Window size in seconds */
+	windowSeconds: number
+	/** Key extractor: "ip", "header:X-Api-Key", etc. */
+	keyBy?: string
+}
+
+/** Security headers configuration for native server */
+export interface NativeSecurityConfig {
+	/** Enable HSTS */
+	hsts?: boolean
+	/** HSTS max-age in seconds (default: 31536000 = 1 year) */
+	hstsMaxAge?: number
+	/** X-Frame-Options: "DENY", "SAMEORIGIN" */
+	frameOptions?: string
+	/** X-Content-Type-Options: nosniff */
+	contentTypeOptions?: boolean
+	/** X-XSS-Protection */
+	xssProtection?: boolean
+	/** Referrer-Policy */
+	referrerPolicy?: string
+}
+
+/** Compression configuration for native server */
+export interface NativeCompressionConfig {
+	/** Enable gzip */
+	gzip?: boolean
+	/** Enable brotli */
+	brotli?: boolean
+	/** Minimum size to compress (bytes) */
+	threshold?: number
+	/** Compression level */
+	level?: number
+}
+
+/** Full server configuration for native server */
+export interface NativeServerConfig {
+	/** Port to listen on */
+	port?: number
+	/** Hostname to bind to */
+	hostname?: string
+	/** Number of worker threads */
+	workers?: number
+	/** CORS configuration */
+	cors?: NativeCorsConfig
+	/** Rate limiting configuration */
+	rateLimit?: NativeRateLimitConfig
+	/** Security headers configuration */
+	security?: NativeSecurityConfig
+	/** Compression configuration */
+	compression?: NativeCompressionConfig
+}
+
 // Native binding interface (from @sylphx/gust-napi)
 export interface NativeBinding {
 	GustServer: new () => NativeServer
+	GustServerWithConfig: (config: NativeServerConfig) => Promise<NativeServer>
 	isIoUringAvailable: () => boolean
+	getCpuCount: () => number
+	corsPermissive: () => NativeCorsConfig
+	securityStrict: () => NativeSecurityConfig
 }
 
 export interface NativeServer {
@@ -26,7 +106,7 @@ export interface NativeServer {
 		status: number,
 		contentType: string,
 		body: string
-	): void
+	): Promise<void>
 	addDynamicRoute(
 		method: string,
 		path: string,
@@ -35,11 +115,18 @@ export interface NativeServer {
 			path: string
 			params: Record<string, string>
 			query?: string
+			headers: Record<string, string>
+			body: string
 		}) => Promise<{ status: number; headers: Record<string, string>; body: string }>
 	): void
+	/** Enable CORS middleware */
+	enableCors(config: NativeCorsConfig): Promise<void>
+	/** Enable rate limiting middleware */
+	enableRateLimit(config: NativeRateLimitConfig): Promise<void>
+	/** Enable security headers middleware */
+	enableSecurity(config: NativeSecurityConfig): Promise<void>
 	serve(port: number): Promise<void>
-	serveRaw(port: number): Promise<void>
-	shutdown(): void
+	shutdown(): Promise<void>
 }
 
 // ============================================================================
@@ -304,4 +391,169 @@ export const isIoUringAvailable = (): boolean => {
  */
 export const getBestBackend = (): 'native' | 'js' => {
 	return isNativeAvailable() ? 'native' : 'js'
+}
+
+/**
+ * Get number of CPU cores (for worker thread configuration)
+ */
+export const getCpuCount = (): number => {
+	const binding = loadNative()
+	if (!binding) return 1
+	try {
+		return binding.getCpuCount()
+	} catch {
+		return 1
+	}
+}
+
+/**
+ * Get permissive CORS configuration from native
+ *
+ * Allows all origins, methods, and headers - suitable for development
+ */
+export const corsPermissive = (): NativeCorsConfig => {
+	const binding = loadNative()
+	if (!binding) {
+		// Fallback if native not available
+		return {
+			origins: ['*'],
+			methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+			allowedHeaders: ['*'],
+			credentials: true,
+			maxAge: 86400,
+		}
+	}
+	return binding.corsPermissive()
+}
+
+/**
+ * Get strict security headers configuration from native
+ *
+ * Enables HSTS, X-Frame-Options: DENY, and other security headers
+ */
+export const securityStrict = (): NativeSecurityConfig => {
+	const binding = loadNative()
+	if (!binding) {
+		// Fallback if native not available
+		return {
+			hsts: true,
+			hstsMaxAge: 31536000,
+			frameOptions: 'DENY',
+			contentTypeOptions: true,
+			xssProtection: true,
+			referrerPolicy: 'strict-origin-when-cross-origin',
+		}
+	}
+	return binding.securityStrict()
+}
+
+// ============================================================================
+// Native Server with Full Configuration
+// ============================================================================
+
+export interface NativeServeWithConfigOptions {
+	readonly port: number
+	readonly hostname?: string
+	readonly config?: NativeServerConfig
+	readonly staticRoutes?: StaticRouteConfig[]
+	readonly onListen?: (info: { port: number; hostname: string }) => void
+	readonly onError?: (error: Error) => void
+}
+
+/**
+ * Start native HTTP server with full configuration
+ *
+ * Supports middleware (CORS, rate limiting, security headers) and static routes.
+ * All middleware runs in Rust for maximum performance.
+ *
+ * @example
+ * ```ts
+ * const server = await nativeServeWithConfig({
+ *   port: 3000,
+ *   config: {
+ *     cors: corsPermissive(),
+ *     security: securityStrict(),
+ *     rateLimit: { maxRequests: 100, windowSeconds: 60 },
+ *   },
+ *   staticRoutes: [
+ *     { method: 'GET', path: '/health', status: 200, contentType: 'application/json', body: '{"status":"ok"}' }
+ *   ]
+ * })
+ * ```
+ */
+export const nativeServeWithConfig = async (
+	options: NativeServeWithConfigOptions
+): Promise<NativeServerHandle | null> => {
+	const binding = loadNative()
+	if (!binding) return null
+
+	const { port, hostname = '0.0.0.0', config, staticRoutes = [], onListen, onError } = options
+
+	try {
+		// Create server with or without config
+		const server = config ? await binding.GustServerWithConfig(config) : new binding.GustServer()
+
+		// Register all static routes
+		for (const route of staticRoutes) {
+			await server.addStaticRoute(
+				route.method,
+				route.path,
+				route.status,
+				route.contentType,
+				route.body
+			)
+		}
+
+		// Start server (non-blocking)
+		server.serve(port).catch((err) => {
+			onError?.(err as Error)
+		})
+
+		onListen?.({ port, hostname })
+
+		return {
+			port,
+			hostname,
+			isNative: true,
+			stop: () => {
+				server.shutdown()
+			},
+		}
+	} catch (err) {
+		onError?.(err as Error)
+		return null
+	}
+}
+
+/**
+ * Create a native server instance for manual configuration
+ *
+ * Use this when you need fine-grained control over server setup.
+ *
+ * @example
+ * ```ts
+ * const server = createNativeServer()
+ * if (server) {
+ *   await server.enableCors(corsPermissive())
+ *   await server.enableSecurity(securityStrict())
+ *   await server.addStaticRoute('GET', '/health', 200, 'application/json', '{"status":"ok"}')
+ *   await server.serve(3000)
+ * }
+ * ```
+ */
+export const createNativeServer = (): NativeServer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return new binding.GustServer()
+}
+
+/**
+ * Create a native server instance with pre-applied configuration
+ */
+export const createNativeServerWithConfig = async (
+	config: NativeServerConfig
+): Promise<NativeServer | null> => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.GustServerWithConfig(config)
 }
