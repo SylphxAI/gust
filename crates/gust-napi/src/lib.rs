@@ -15,8 +15,9 @@ use gust_core::{
         otel::{Span as RustSpan, SpanContext as RustSpanContext, SpanStatus as RustSpanStatus, Tracer as RustTracer, TracerConfig as RustTracerConfig, MetricsCollector as RustMetricsCollector, generate_trace_id as rust_generate_trace_id, generate_span_id as rust_generate_span_id, parse_traceparent as rust_parse_traceparent, format_traceparent as rust_format_traceparent},
     },
 };
-use http_body_util::Full;
+use http_body_util::{Full, BodyExt};
 use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{ThreadsafeFunction, ErrorStrategy};
 use napi_derive::napi;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -841,19 +842,81 @@ struct StaticResponse {
     bytes: Bytes,
 }
 
+// ============================================================================
+// Native Request/Response for JS handlers
+// ============================================================================
+
+/// Request object passed to JS handlers
+#[napi(object)]
+#[derive(Clone)]
+pub struct NativeRequest {
+    /// HTTP method
+    pub method: String,
+    /// Request path
+    pub path: String,
+    /// Query string (without ?)
+    pub query: Option<String>,
+    /// Route parameters (e.g., { id: "123" })
+    pub params: HashMap<String, String>,
+    /// Request headers
+    pub headers: HashMap<String, String>,
+    /// Request body (raw bytes as string for now)
+    pub body: Option<String>,
+    /// Client IP address
+    pub ip: Option<String>,
+}
+
+/// Response object returned from JS handlers
+#[napi(object)]
+#[derive(Clone, Default)]
+pub struct NativeResponse {
+    /// HTTP status code
+    pub status: Option<u32>,
+    /// Response headers
+    pub headers: Option<HashMap<String, String>>,
+    /// Response body
+    pub body: Option<String>,
+}
+
+/// Handler callback type - uses RequestContext for input
+type HandlerCallback = ThreadsafeFunction<RequestContext, ErrorStrategy::Fatal>;
+
+/// Dynamic route handler
+struct DynamicHandler {
+    callback: HandlerCallback,
+}
+
+// Safety: HandlerCallback (ThreadsafeFunction) is designed to be Send + Sync
+unsafe impl Send for DynamicHandler {}
+unsafe impl Sync for DynamicHandler {}
+
+impl Clone for DynamicHandler {
+    fn clone(&self) -> Self {
+        Self {
+            callback: self.callback.clone(),
+        }
+    }
+}
+
 /// Server state shared across all connections
 struct ServerState {
     /// Static routes (pre-rendered responses)
     static_routes: RwLock<Router<StaticResponse>>,
+    /// Dynamic routes (JS handlers)
+    dynamic_routes: RwLock<Router<DynamicHandler>>,
     /// Middleware chain
     middleware: RwLock<MiddlewareChain>,
+    /// Fallback handler for unmatched routes
+    fallback_handler: RwLock<Option<DynamicHandler>>,
 }
 
 impl ServerState {
     fn new() -> Self {
         Self {
             static_routes: RwLock::new(Router::new()),
+            dynamic_routes: RwLock::new(Router::new()),
             middleware: RwLock::new(MiddlewareChain::new()),
+            fallback_handler: RwLock::new(None),
         }
     }
 }
@@ -1041,6 +1104,49 @@ impl GustServer {
             .map_err(|e| Error::from_reason(e.to_string()))
     }
 
+    /// Add a dynamic route with JS handler callback
+    ///
+    /// The handler will be called with RequestContext and should return ResponseData (or Promise<ResponseData>)
+    #[napi]
+    pub fn add_dynamic_route(
+        &self,
+        method: String,
+        path: String,
+        handler: JsFunction,
+    ) -> Result<()> {
+        let method_enum = Method::from_str(&method)
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+
+        // Create threadsafe function that can be called from any thread
+        let tsfn: ThreadsafeFunction<RequestContext, ErrorStrategy::Fatal> = handler
+            .create_threadsafe_function(0, |ctx| {
+                Ok(vec![ctx.value])
+            })?;
+
+        let handler = DynamicHandler { callback: tsfn };
+
+        // Use blocking write since we're not in async context
+        let mut routes = self.state.dynamic_routes.blocking_write();
+        routes.route(method_enum, &path, handler)
+            .map_err(|e| Error::from_reason(e.to_string()))
+    }
+
+    /// Set fallback handler for unmatched routes
+    #[napi]
+    pub fn set_fallback(
+        &self,
+        handler: JsFunction,
+    ) -> Result<()> {
+        let tsfn: ThreadsafeFunction<RequestContext, ErrorStrategy::Fatal> = handler
+            .create_threadsafe_function(0, |ctx| {
+                Ok(vec![ctx.value])
+            })?;
+
+        let handler = DynamicHandler { callback: tsfn };
+        *self.state.fallback_handler.blocking_write() = Some(handler);
+        Ok(())
+    }
+
     /// Start the server (non-blocking)
     #[napi]
     pub async fn serve(&self, port: u32) -> Result<()> {
@@ -1124,20 +1230,26 @@ async fn handle_request(
     state: Arc<ServerState>,
     req: hyper::Request<hyper::body::Incoming>,
 ) -> std::result::Result<hyper::Response<Full<Bytes>>, std::convert::Infallible> {
-    let method_str = req.method().as_str();
+    let method_str = req.method().as_str().to_string();
     let path = req.uri().path().to_string();
     let query = req.uri().query().map(|s| s.to_string());
 
-    // Create our Request type
-    let method = Method::from_str(method_str).unwrap_or(Method::Get);
-    let mut request = Request::new(method, path.clone());
-    request.query = query;
-
-    // Copy headers
+    // Collect headers into HashMap
+    let mut headers_map: HashMap<String, String> = HashMap::new();
     for (name, value) in req.headers() {
         if let Ok(v) = value.to_str() {
-            request.headers.push((name.to_string(), v.to_string()));
+            headers_map.insert(name.to_string().to_lowercase(), v.to_string());
         }
+    }
+
+    // Create our Request type for middleware
+    let method = Method::from_str(&method_str).unwrap_or(Method::Get);
+    let mut request = Request::new(method, path.clone());
+    request.query = query.clone();
+
+    // Copy headers to request
+    for (name, value) in &headers_map {
+        request.headers.push((name.clone(), value.clone()));
     }
 
     // Apply middleware chain (before)
@@ -1146,22 +1258,129 @@ async fn handle_request(
         // Middleware short-circuited - return early response
         return Ok(to_hyper_response(early_response));
     }
+    drop(middleware);
 
-    // Try to match static route
-    let routes = state.static_routes.read().await;
-    let mut our_response = if let Some(matched) = routes.match_route(request.method, &path) {
-        // Return pre-rendered response
-        let response_bytes = matched.value.bytes.clone();
-        Response::json(response_bytes)
-    } else {
-        // 404 Not Found
-        Response::not_found()
+    // 1. Try static routes first (fastest path)
+    {
+        let routes = state.static_routes.read().await;
+        if let Some(matched) = routes.match_route(method, &path) {
+            // Return pre-rendered response - bypass middleware after for max speed
+            let response_bytes = matched.value.bytes.clone();
+            return Ok(hyper::Response::builder()
+                .status(200)
+                .body(Full::new(response_bytes))
+                .unwrap());
+        }
+    }
+
+    // 2. Try dynamic routes
+    let dynamic_result = {
+        let routes = state.dynamic_routes.read().await;
+        routes.match_route(method, &path).map(|m| (m.value.clone(), m.params.clone()))
     };
 
-    // Apply middleware chain (after)
+    if let Some((handler, params)) = dynamic_result {
+        // Read body for dynamic handlers
+        let body_bytes = match req.collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(_) => Bytes::new(),
+        };
+        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
+
+        // Create RequestContext for JS handler (matches TypeScript interface)
+        let ctx = RequestContext {
+            method: method_str.clone(),
+            path: path.clone(),
+            query,
+            params,
+            headers: headers_map,
+            body: body_str,
+        };
+
+        // Call JS handler
+        let response = call_js_handler(&handler.callback, ctx).await;
+        let mut our_response = response_data_to_response(response);
+
+        // Apply middleware chain (after)
+        let middleware = state.middleware.read().await;
+        middleware.run_after(&request, &mut our_response);
+
+        return Ok(to_hyper_response(our_response));
+    }
+
+    // 3. Try fallback handler
+    let fallback = state.fallback_handler.read().await.clone();
+    if let Some(handler) = fallback {
+        // Read body for fallback handler
+        let body_bytes = match req.collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(_) => Bytes::new(),
+        };
+        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
+
+        let ctx = RequestContext {
+            method: method_str,
+            path: path.clone(),
+            query,
+            params: HashMap::new(),
+            headers: headers_map,
+            body: body_str,
+        };
+
+        let response = call_js_handler(&handler.callback, ctx).await;
+        let mut our_response = response_data_to_response(response);
+
+        // Apply middleware chain (after)
+        let middleware = state.middleware.read().await;
+        middleware.run_after(&request, &mut our_response);
+
+        return Ok(to_hyper_response(our_response));
+    }
+
+    // 4. No route matched - 404
+    let mut our_response = Response::not_found();
+    let middleware = state.middleware.read().await;
     middleware.run_after(&request, &mut our_response);
 
     Ok(to_hyper_response(our_response))
+}
+
+/// Call JS handler and await result
+async fn call_js_handler(
+    callback: &ThreadsafeFunction<RequestContext, ErrorStrategy::Fatal>,
+    ctx: RequestContext,
+) -> ResponseData {
+    // Use call_async to properly handle Promise returns
+    match callback.call_async::<Promise<ResponseData>>(ctx).await {
+        Ok(promise) => {
+            match promise.await {
+                Ok(response) => response,
+                Err(_) => ResponseData {
+                    status: 500,
+                    headers: HashMap::new(),
+                    body: "Internal Server Error".to_string(),
+                },
+            }
+        }
+        Err(_) => ResponseData {
+            status: 500,
+            headers: HashMap::new(),
+            body: "Internal Server Error".to_string(),
+        },
+    }
+}
+
+/// Convert ResponseData to our Response type
+fn response_data_to_response(data: ResponseData) -> Response {
+    let mut res = ResponseBuilder::new(StatusCode(data.status as u16))
+        .body(data.body)
+        .build();
+
+    for (name, value) in data.headers {
+        res.headers.push((name, value));
+    }
+
+    res
 }
 
 /// Convert our Response to hyper Response

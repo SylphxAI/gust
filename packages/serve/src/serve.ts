@@ -122,6 +122,11 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
 
 /**
  * Native server implementation using Rust napi-rs backend
+ *
+ * Architecture:
+ * - All HTTP parsing and routing happens in Rust
+ * - JS handler is called via threadsafe callback for dynamic routes
+ * - Middleware (CORS, rate limiting, security) runs in Rust
  */
 const serveNative = async (
 	options: ServeOptions,
@@ -136,23 +141,33 @@ const serveNative = async (
 	try {
 		const server = new binding.GustServer()
 
-		// Add catch-all dynamic route that invokes the JS handler
-		server.addDynamicRoute('*', '/*path', async (nativeCtx) => {
+		// Set fallback handler that routes all requests to JS handler
+		// This is the native-first architecture: Rust handles HTTP, JS handles business logic
+		server.setFallback(async (ctx) => {
 			try {
-				// Create a minimal context for the handler
-				const ctx: Context = {
-					method: nativeCtx.method,
-					path: nativeCtx.path,
-					query: nativeCtx.query ?? '',
-					headers: {}, // Native doesn't provide headers yet for dynamic routes
-					params: nativeCtx.params,
-					body: Buffer.alloc(0), // Native doesn't provide body yet
-					json: <T>() => ({}) as T,
-					raw: Buffer.alloc(0),
+				// Parse body if present
+				const bodyBuffer = ctx.body ? Buffer.from(ctx.body) : Buffer.alloc(0)
+
+				// Create full context for the handler
+				const fullCtx: Context = {
+					method: ctx.method,
+					path: ctx.path,
+					query: ctx.query ?? '',
+					headers: ctx.headers,
+					params: ctx.params,
+					body: bodyBuffer,
+					json: <T>() => {
+						try {
+							return JSON.parse(ctx.body || '{}') as T
+						} catch {
+							return {} as T
+						}
+					},
+					raw: bodyBuffer,
 					socket: null as unknown as Socket, // Not available for native
 				}
 
-				const response = await handler(ctx)
+				const response = await handler(fullCtx)
 
 				// Convert ServerResponse to native format
 				const headers: Record<string, string> = {}
@@ -167,7 +182,9 @@ const serveNative = async (
 						? ''
 						: typeof response.body === 'string'
 							? response.body
-							: response.body.toString()
+							: Buffer.isBuffer(response.body)
+								? response.body.toString()
+								: String(response.body)
 
 				return {
 					status: response.status,
@@ -195,7 +212,7 @@ const serveNative = async (
 			port,
 			hostname,
 			tls: false,
-			connections: () => 0, // Native doesn't track connections yet
+			connections: () => 0, // Native tracks connections internally
 			stop: () =>
 				new Promise((resolve) => {
 					server.shutdown()

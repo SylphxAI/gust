@@ -219,6 +219,8 @@ export type {
 	NativeTrustProxy,
 	NativeValidationError,
 	NativeValidationResult,
+	RequestContext,
+	ResponseData,
 	StaticRouteConfig,
 } from './native'
 // Native acceleration (optional)

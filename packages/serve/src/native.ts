@@ -291,6 +291,23 @@ export interface NativeBinding {
 	MetricsCollector: new () => NativeMetricsCollector
 }
 
+/** Request context passed to JS handlers */
+export interface RequestContext {
+	method: string
+	path: string
+	params: Record<string, string>
+	query?: string
+	headers: Record<string, string>
+	body: string
+}
+
+/** Response data returned from JS handlers */
+export interface ResponseData {
+	status: number
+	headers: Record<string, string>
+	body: string
+}
+
 export interface NativeServer {
 	addStaticRoute(
 		method: string,
@@ -299,18 +316,14 @@ export interface NativeServer {
 		contentType: string,
 		body: string
 	): Promise<void>
+	/** Add a dynamic route with JS handler callback */
 	addDynamicRoute(
 		method: string,
 		path: string,
-		callback: (ctx: {
-			method: string
-			path: string
-			params: Record<string, string>
-			query?: string
-			headers: Record<string, string>
-			body: string
-		}) => Promise<{ status: number; headers: Record<string, string>; body: string }>
+		callback: (ctx: RequestContext) => Promise<ResponseData>
 	): void
+	/** Set fallback handler for unmatched routes */
+	setFallback(callback: (ctx: RequestContext) => Promise<ResponseData>): void
 	/** Enable CORS middleware */
 	enableCors(config: NativeCorsConfig): Promise<void>
 	/** Enable rate limiting middleware */
