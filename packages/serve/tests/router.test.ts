@@ -107,7 +107,7 @@ describe('Router', () => {
 	})
 
 	describe('nested routers', () => {
-		it('should flatten nested routers', () => {
+		it('should preserve nested structure', () => {
 			const home = get('/', () => text('hi'))
 			const help = get('/help', () => text('help'))
 			const member = router({ home, help })
@@ -115,13 +115,13 @@ describe('Router', () => {
 			const login = get('/login', () => text('login'))
 			const app = router({ login, member })
 
-			// Should have all routes flattened
+			// Structure is preserved
 			expect(app.routes.login.path).toBe('/login')
-			expect(app.routes.home.path).toBe('/')
-			expect(app.routes.help.path).toBe('/help')
+			expect(app.routes.member.routes.home.path).toBe('/')
+			expect(app.routes.member.routes.help.path).toBe('/help')
 		})
 
-		it('should generate URLs for nested routes', () => {
+		it('should generate URLs preserving structure', () => {
 			const home = get('/', () => text('hi'))
 			const help = get('/help', () => text('help'))
 			const member = router({ home, help })
@@ -129,9 +129,10 @@ describe('Router', () => {
 			const login = get('/login', () => text('login'))
 			const app = router({ login, member })
 
+			// URL generators follow structure
 			expect(app.url.login()).toBe('/login')
-			expect(app.url.home()).toBe('/')
-			expect(app.url.help()).toBe('/help')
+			expect(app.url.member.home()).toBe('/')
+			expect(app.url.member.help()).toBe('/help')
 		})
 
 		it('should work with prefixed nested routers', () => {
@@ -143,8 +144,12 @@ describe('Router', () => {
 			const app = router({ home, api })
 
 			expect(app.routes.home.path).toBe('/')
-			expect(app.routes.health.path).toBe('/api/health')
-			expect(app.routes.users.path).toBe('/api/users')
+			expect(app.routes.api.routes.health.path).toBe('/api/health')
+			expect(app.routes.api.routes.users.path).toBe('/api/users')
+
+			expect(app.url.home()).toBe('/')
+			expect(app.url.api.health()).toBe('/api/health')
+			expect(app.url.api.users()).toBe('/api/users')
 		})
 
 		it('should work with multiple nested routers', () => {
@@ -158,8 +163,11 @@ describe('Router', () => {
 			const app = router({ home, api, auth })
 
 			expect(app.routes.home.path).toBe('/')
-			expect(app.routes.health.path).toBe('/api/health')
-			expect(app.routes.login.path).toBe('/auth/login')
+			expect(app.routes.api.routes.health.path).toBe('/api/health')
+			expect(app.routes.auth.routes.login.path).toBe('/auth/login')
+
+			expect(app.url.api.health()).toBe('/api/health')
+			expect(app.url.auth.login()).toBe('/auth/login')
 		})
 
 		it('should deeply nest routers', () => {
@@ -173,8 +181,11 @@ describe('Router', () => {
 			const app = router({ home, middle })
 
 			expect(app.routes.home.path).toBe('/')
-			expect(app.routes.list.path).toBe('/mid/list')
-			expect(app.routes.item.path).toBe('/mid/item')
+			expect(app.routes.middle.routes.list.path).toBe('/mid/list')
+			expect(app.routes.middle.routes.inner.routes.item.path).toBe('/mid/item')
+
+			expect(app.url.middle.list()).toBe('/mid/list')
+			expect(app.url.middle.inner.item()).toBe('/mid/item')
 		})
 	})
 

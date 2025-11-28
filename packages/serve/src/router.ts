@@ -49,11 +49,16 @@ export type Route<TMethod extends string = string, TPath extends string = string
 
 export type Routes = Record<string, Route<string, string>>
 
-export type UrlGenerator<T extends Routes> = {
-	[K in keyof T]: T[K] extends Route<string, infer P> ? UrlFn<P> : never
+/** URL generator - preserves nested structure */
+export type UrlGenerator<T> = {
+	[K in keyof T]: T[K] extends Route<string, infer P>
+		? UrlFn<P>
+		: T[K] extends Router<infer R>
+			? UrlGenerator<R>
+			: never
 }
 
-export type Router<T extends Routes> = {
+export type Router<T> = {
 	readonly handler: Handler<Context>
 	readonly routes: T
 	readonly url: UrlGenerator<T>
@@ -62,15 +67,6 @@ export type Router<T extends Routes> = {
 
 /** Input to router() - can be Route or nested Router */
 export type RoutesInput = Record<string, Route<string, string> | Router<Routes>>
-
-/** Flatten nested routers into flat routes */
-type FlattenRoutes<T extends RoutesInput> = {
-	[K in keyof T as T[K] extends Router<infer R> ? keyof R : K]: T[K] extends Router<infer R>
-		? R[keyof R]
-		: T[K]
-} extends infer O
-	? { [K in keyof O]: O[K] }
-	: never
 
 // ============================================================================
 // Route Helpers
@@ -154,6 +150,10 @@ export const all = <TPath extends string>(
 // URL Generation
 // ============================================================================
 
+/** Check if value is a Router */
+const isRouter = (value: unknown): value is Router<RoutesInput> =>
+	typeof value === 'object' && value !== null && '_isRouter' in value && value._isRouter === true
+
 const generateUrl = (path: string, params?: Record<string, string | number>): string => {
 	if (!params) return path
 	return path.replace(/:([^/]+)/g, (_, key) => {
@@ -163,14 +163,34 @@ const generateUrl = (path: string, params?: Record<string, string | number>): st
 	})
 }
 
-const createUrlGenerators = <T extends Routes>(routes: T): UrlGenerator<T> => {
+/** Create URL generators preserving nested structure */
+const createUrlGenerators = <T extends RoutesInput>(routes: T): UrlGenerator<T> => {
 	const generators = {} as UrlGenerator<T>
-	for (const [name, route] of Object.entries(routes)) {
-		;(generators as Record<string, (params?: Record<string, string | number>) => string>)[name] = (
-			params?: Record<string, string | number>
-		) => generateUrl(route.path, params)
+	for (const [name, value] of Object.entries(routes)) {
+		if (isRouter(value)) {
+			// Nested router - use its URL generators directly (preserves structure)
+			;(generators as Record<string, unknown>)[name] = value.url
+		} else {
+			// Regular route
+			;(generators as Record<string, (params?: Record<string, string | number>) => string>)[name] =
+				(params?: Record<string, string | number>) => generateUrl(value.path, params)
+		}
 	}
 	return generators
+}
+
+/** Recursively flatten routes for WASM router registration */
+const flattenRoutesForWasm = (input: RoutesInput): Route[] => {
+	const result: Route[] = []
+	for (const value of Object.values(input)) {
+		if (isRouter(value)) {
+			// Nested router - recursively flatten
+			result.push(...flattenRoutesForWasm(value.routes as RoutesInput))
+		} else {
+			result.push(value)
+		}
+	}
+	return result
 }
 
 // ============================================================================
@@ -207,58 +227,60 @@ const createUrlGenerators = <T extends Routes>(routes: T): UrlGenerator<T> => {
  * app.url.user({ id: 42 })    // "/users/42"
  * ```
  */
-/** Check if value is a Router */
-const isRouter = (value: unknown): value is Router<Routes> =>
-	typeof value === 'object' && value !== null && '_isRouter' in value && value._isRouter === true
-
-/** Flatten routes - extract routes from nested routers */
-const flattenRoutes = (input: RoutesInput): Routes => {
-	const result: Routes = {}
-	for (const [name, value] of Object.entries(input)) {
+/** Apply prefix to routes (including nested routers) */
+const applyPrefix = <T extends RoutesInput>(prefix: string, routes: T): T => {
+	const result = {} as T
+	for (const [name, value] of Object.entries(routes)) {
 		if (isRouter(value)) {
-			// Nested router - merge its routes
-			Object.assign(result, value.routes)
+			// Nested router - apply prefix to its routes recursively
+			const prefixedNestedRoutes = applyPrefix(prefix, value.routes as RoutesInput)
+			;(result as Record<string, unknown>)[name] = {
+				...value,
+				routes: prefixedNestedRoutes,
+				url: createUrlGenerators(prefixedNestedRoutes),
+			}
 		} else {
-			// Regular route
-			result[name] = value
+			// Regular route - apply prefix to path
+			;(result as Record<string, unknown>)[name] = {
+				...value,
+				path: `${prefix}${value.path}`,
+			}
 		}
 	}
 	return result
 }
 
-export function router<T extends RoutesInput>(routes: T): Router<FlattenRoutes<T> & Routes>
+export function router<T extends RoutesInput>(routes: T): Router<T>
 export function router<TPrefix extends string, T extends RoutesInput>(
 	prefixPath: TPrefix,
 	routes: T
 ): Router<{
-	[K in keyof FlattenRoutes<T>]: FlattenRoutes<T>[K] extends Route<infer M, infer P>
+	[K in keyof T]: T[K] extends Route<infer M, infer P>
 		? Route<M, `${TPrefix}${P}`>
-		: never
+		: T[K] extends Router<infer R>
+			? Router<{
+					[RK in keyof R]: R[RK] extends Route<infer RM, infer RP>
+						? Route<RM, `${TPrefix}${RP}`>
+						: R[RK]
+				}>
+			: never
 }>
 export function router<T extends RoutesInput>(
 	prefixOrRoutes: string | T,
 	maybeRoutes?: T
-): Router<Routes> {
+): Router<T> {
 	const hasPrefix = typeof prefixOrRoutes === 'string'
 	const prefixPath = hasPrefix ? prefixOrRoutes : ''
 	const inputRoutes = (hasPrefix ? maybeRoutes : prefixOrRoutes) as T
 
-	// Flatten nested routers first
-	const flatRoutes = flattenRoutes(inputRoutes)
+	// Apply prefix if provided (preserves structure)
+	const routes = hasPrefix ? applyPrefix(prefixPath, inputRoutes) : inputRoutes
 
-	// Apply prefix to all routes if provided
-	const prefixedRoutes = hasPrefix
-		? (Object.fromEntries(
-				Object.entries(flatRoutes).map(([name, route]) => [
-					name,
-					{ ...route, path: `${prefixPath}${route.path}` },
-				])
-			) as Routes)
-		: flatRoutes
+	// Flatten for WASM router registration only
+	const flatRouteList = flattenRoutesForWasm(routes)
 
 	let wasmRouter: WasmRouter | null = null
 	const handlers: Handler<Context>[] = []
-	const routeList = Object.values(prefixedRoutes)
 
 	const initRouter = () => {
 		if (wasmRouter) return wasmRouter
@@ -266,7 +288,7 @@ export function router<T extends RoutesInput>(
 		const wasm = getWasm()
 		wasmRouter = new wasm.WasmRouter()
 
-		for (const route of routeList) {
+		for (const route of flatRouteList) {
 			const handlerId = handlers.length
 			handlers.push(route.handler)
 			wasmRouter.insert(route.method, route.path, handlerId)
@@ -309,8 +331,8 @@ export function router<T extends RoutesInput>(
 
 	return {
 		handler,
-		routes: prefixedRoutes,
-		url: createUrlGenerators(prefixedRoutes),
+		routes,
+		url: createUrlGenerators(routes),
 		_isRouter: true as const,
 	}
 }
