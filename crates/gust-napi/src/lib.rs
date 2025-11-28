@@ -35,6 +35,7 @@ use napi::threadsafe_function::{ThreadsafeFunction, ErrorStrategy};
 use napi_derive::napi;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::RwLock;
 
@@ -954,16 +955,16 @@ struct ServerState {
     compression: RwLock<Option<CompressionConfig>>,
     /// TLS configuration
     tls_config: RwLock<Option<TlsConfig>>,
-    /// Enable HTTP/2
-    http2_enabled: RwLock<bool>,
-    /// Request timeout in milliseconds
-    request_timeout_ms: RwLock<u32>,
-    /// Maximum body size in bytes
-    max_body_size: RwLock<u32>,
-    /// Keep-alive timeout in milliseconds
-    keep_alive_timeout_ms: RwLock<u32>,
-    /// Maximum header size in bytes
-    max_header_size: RwLock<u32>,
+    /// Enable HTTP/2 (atomic for lock-free read)
+    http2_enabled: AtomicBool,
+    /// Request timeout in milliseconds (atomic for lock-free read)
+    request_timeout_ms: AtomicU32,
+    /// Maximum body size in bytes (atomic for lock-free read)
+    max_body_size: AtomicU32,
+    /// Keep-alive timeout in milliseconds (atomic for lock-free read)
+    keep_alive_timeout_ms: AtomicU32,
+    /// Maximum header size in bytes (atomic for lock-free read)
+    max_header_size: AtomicU32,
 }
 
 // Default values
@@ -981,11 +982,11 @@ impl ServerState {
             fallback_handler: RwLock::new(None),
             compression: RwLock::new(None),
             tls_config: RwLock::new(None),
-            http2_enabled: RwLock::new(false),
-            request_timeout_ms: RwLock::new(DEFAULT_REQUEST_TIMEOUT_MS),
-            max_body_size: RwLock::new(DEFAULT_MAX_BODY_SIZE),
-            keep_alive_timeout_ms: RwLock::new(DEFAULT_KEEP_ALIVE_TIMEOUT_MS),
-            max_header_size: RwLock::new(DEFAULT_MAX_HEADER_SIZE),
+            http2_enabled: AtomicBool::new(false),
+            request_timeout_ms: AtomicU32::new(DEFAULT_REQUEST_TIMEOUT_MS),
+            max_body_size: AtomicU32::new(DEFAULT_MAX_BODY_SIZE),
+            keep_alive_timeout_ms: AtomicU32::new(DEFAULT_KEEP_ALIVE_TIMEOUT_MS),
+            max_header_size: AtomicU32::new(DEFAULT_MAX_HEADER_SIZE),
         }
     }
 }
@@ -1039,21 +1040,21 @@ impl GustServer {
         }
 
         if let Some(http2) = config.http2 {
-            *server.state.http2_enabled.write().await = http2;
+            server.state.http2_enabled.store(http2, Ordering::Relaxed);
         }
 
-        // Apply timeout and limit configurations
+        // Apply timeout and limit configurations (lock-free atomic stores)
         if let Some(timeout) = config.request_timeout_ms {
-            *server.state.request_timeout_ms.write().await = timeout;
+            server.state.request_timeout_ms.store(timeout, Ordering::Relaxed);
         }
         if let Some(max_body) = config.max_body_size {
-            *server.state.max_body_size.write().await = max_body;
+            server.state.max_body_size.store(max_body, Ordering::Relaxed);
         }
         if let Some(keep_alive) = config.keep_alive_timeout_ms {
-            *server.state.keep_alive_timeout_ms.write().await = keep_alive;
+            server.state.keep_alive_timeout_ms.store(keep_alive, Ordering::Relaxed);
         }
         if let Some(max_header) = config.max_header_size {
-            *server.state.max_header_size.write().await = max_header;
+            server.state.max_header_size.store(max_header, Ordering::Relaxed);
         }
 
         Ok(server)
@@ -1062,28 +1063,28 @@ impl GustServer {
     /// Set request timeout in milliseconds
     #[napi]
     pub async fn set_request_timeout(&self, timeout_ms: u32) -> Result<()> {
-        *self.state.request_timeout_ms.write().await = timeout_ms;
+        self.state.request_timeout_ms.store(timeout_ms, Ordering::Relaxed);
         Ok(())
     }
 
     /// Set maximum body size in bytes
     #[napi]
     pub async fn set_max_body_size(&self, max_bytes: u32) -> Result<()> {
-        *self.state.max_body_size.write().await = max_bytes;
+        self.state.max_body_size.store(max_bytes, Ordering::Relaxed);
         Ok(())
     }
 
     /// Set keep-alive timeout in milliseconds
     #[napi]
     pub async fn set_keep_alive_timeout(&self, timeout_ms: u32) -> Result<()> {
-        *self.state.keep_alive_timeout_ms.write().await = timeout_ms;
+        self.state.keep_alive_timeout_ms.store(timeout_ms, Ordering::Relaxed);
         Ok(())
     }
 
     /// Set maximum header size in bytes
     #[napi]
     pub async fn set_max_header_size(&self, max_bytes: u32) -> Result<()> {
-        *self.state.max_header_size.write().await = max_bytes;
+        self.state.max_header_size.store(max_bytes, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1104,7 +1105,7 @@ impl GustServer {
     /// Enable HTTP/2
     #[napi]
     pub async fn enable_http2(&self) -> Result<()> {
-        *self.state.http2_enabled.write().await = true;
+        self.state.http2_enabled.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1313,7 +1314,7 @@ impl GustServer {
 
         let state = self.state.clone();
         let tls_config = state.tls_config.read().await.clone();
-        let http2_enabled = *state.http2_enabled.read().await;
+        let http2_enabled = state.http2_enabled.load(Ordering::Relaxed);
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         *self.shutdown_tx.write().await = Some(shutdown_tx);
@@ -1587,41 +1588,15 @@ async fn handle_request(
     state: Arc<ServerState>,
     req: hyper::Request<hyper::body::Incoming>,
 ) -> std::result::Result<hyper::Response<Full<Bytes>>, std::convert::Infallible> {
-    let method_str = req.method().as_str().to_string();
-    let path = req.uri().path().to_string();
-    let query = req.uri().query().map(|s| s.to_string());
+    let method_str = req.method().as_str();
+    let path = req.uri().path();
+    let method = Method::from_str(method_str).unwrap_or(Method::Get);
+    let _is_get_or_head = method == Method::Get || method == Method::Head;
 
-    // Collect headers into HashMap
-    let mut headers_map: HashMap<String, String> = HashMap::new();
-    for (name, value) in req.headers() {
-        if let Ok(v) = value.to_str() {
-            headers_map.insert(name.to_string().to_lowercase(), v.to_string());
-        }
-    }
-
-    // Create our Request type for middleware
-    let method = Method::from_str(&method_str).unwrap_or(Method::Get);
-    let mut request = Request::new(method, path.clone());
-    request.query = query.clone();
-
-    // Copy headers to request
-    for (name, value) in &headers_map {
-        request.headers.push((name.clone(), value.clone()));
-    }
-
-    // Apply middleware chain (before)
-    let middleware = state.middleware.read().await;
-    if let Some(early_response) = middleware.run_before(&mut request) {
-        // Middleware short-circuited - return early response
-        return Ok(to_hyper_response(early_response));
-    }
-    drop(middleware);
-
-    // 1. Try static routes first (fastest path)
+    // FAST PATH: Check static routes first with minimal overhead
     {
         let routes = state.static_routes.read().await;
-        if let Some(matched) = routes.match_route(method, &path) {
-            // Return pre-rendered response - bypass middleware after for max speed
+        if let Some(matched) = routes.match_route(method, path) {
             let response_bytes = matched.value.bytes.clone();
             return Ok(hyper::Response::builder()
                 .status(200)
@@ -1630,6 +1605,75 @@ async fn handle_request(
         }
     }
 
+    // Check middleware early to know if we need request object
+    let middleware = state.middleware.read().await;
+    let has_middleware = !middleware.is_empty();
+    drop(middleware);
+
+    // FAST PATH: No middleware, check if we can use fallback directly
+    if !has_middleware {
+        // Check dynamic routes first
+        let dynamic_result = {
+            let routes = state.dynamic_routes.read().await;
+            routes.match_route(method, path).map(|m| (m.value.clone(), m.params.clone()))
+        };
+
+        if dynamic_result.is_none() {
+            // No dynamic route match - try fallback with minimal context
+            let fallback = state.fallback_handler.read().await.clone();
+            if let Some(handler) = fallback {
+                // Minimal context for fallback - only allocate what's needed
+                let ctx = RequestContext {
+                    method: method_str.to_string(),
+                    path: path.to_string(),
+                    query: req.uri().query().map(|s| s.to_string()),
+                    params: HashMap::new(),
+                    headers: HashMap::new(), // Empty for fast path
+                    body: String::new(),     // Skip body for GET/HEAD
+                };
+
+                let response = call_js_handler(&handler.callback, ctx).await;
+                return Ok(to_hyper_response(response_data_to_response(response)));
+            }
+
+            // No fallback - 404
+            return Ok(to_hyper_response(Response::not_found()));
+        }
+
+        // Has dynamic route - need full context, fall through
+    }
+
+    // For dynamic routes with middleware, we need full context
+    let method_str = method_str.to_string();
+    let path = path.to_string();
+    let query = req.uri().query().map(|s| s.to_string());
+
+    // Collect headers into HashMap
+    let mut headers_map: HashMap<String, String> = HashMap::with_capacity(req.headers().len());
+    for (name, value) in req.headers() {
+        if let Ok(v) = value.to_str() {
+            headers_map.insert(name.as_str().to_lowercase(), v.to_string());
+        }
+    }
+
+    // Create request object for middleware (if needed)
+    let middleware = state.middleware.read().await;
+    let request = if has_middleware {
+        let mut mw_req = Request::new(method, path.clone());
+        mw_req.query = query.clone();
+        for (name, value) in &headers_map {
+            mw_req.headers.push((name.clone(), value.clone()));
+        }
+        // Run before middleware
+        if let Some(early_response) = middleware.run_before(&mut mw_req) {
+            return Ok(to_hyper_response(early_response));
+        }
+        Some(mw_req)
+    } else {
+        None
+    };
+    drop(middleware);
+
     // 2. Try dynamic routes
     let dynamic_result = {
         let routes = state.dynamic_routes.read().await;
@@ -1637,8 +1681,8 @@ async fn handle_request(
     };
 
     if let Some((handler, params)) = dynamic_result {
-        // Check body size limit
-        let max_body_size = *state.max_body_size.read().await as usize;
+        // Check body size limit (lock-free atomic read)
+        let max_body_size = state.max_body_size.load(Ordering::Relaxed) as usize;
         if let Some(content_length) = headers_map.get("content-length") {
             if let Ok(len) = content_length.parse::<usize>() {
                 if len > max_body_size {
@@ -1651,8 +1695,8 @@ async fn handle_request(
             }
         }
 
-        // Read body for dynamic handlers with timeout
-        let request_timeout = *state.request_timeout_ms.read().await;
+        // Read body for dynamic handlers with timeout (lock-free atomic read)
+        let request_timeout = state.request_timeout_ms.load(Ordering::Relaxed);
         let body_result = if request_timeout > 0 {
             tokio::time::timeout(
                 Duration::from_millis(request_timeout as u64),
@@ -1701,9 +1745,11 @@ async fn handle_request(
         let response = call_js_handler(&handler.callback, ctx).await;
         let mut our_response = response_data_to_response(response);
 
-        // Apply middleware chain (after)
-        let middleware = state.middleware.read().await;
-        middleware.run_after(&request, &mut our_response);
+        // Apply middleware chain (after) - only if middleware exists
+        if let Some(ref req) = request {
+            let middleware = state.middleware.read().await;
+            middleware.run_after(req, &mut our_response);
+        }
 
         return Ok(to_hyper_response(our_response));
     }
@@ -1711,8 +1757,8 @@ async fn handle_request(
     // 3. Try fallback handler
     let fallback = state.fallback_handler.read().await.clone();
     if let Some(handler) = fallback {
-        // Check body size limit
-        let max_body_size = *state.max_body_size.read().await as usize;
+        // Check body size limit (lock-free atomic read)
+        let max_body_size = state.max_body_size.load(Ordering::Relaxed) as usize;
         if let Some(content_length) = headers_map.get("content-length") {
             if let Ok(len) = content_length.parse::<usize>() {
                 if len > max_body_size {
@@ -1725,8 +1771,8 @@ async fn handle_request(
             }
         }
 
-        // Read body for fallback handler with timeout
-        let request_timeout = *state.request_timeout_ms.read().await;
+        // Read body for fallback handler with timeout (lock-free atomic read)
+        let request_timeout = state.request_timeout_ms.load(Ordering::Relaxed);
         let body_result = if request_timeout > 0 {
             tokio::time::timeout(
                 Duration::from_millis(request_timeout as u64),
@@ -1771,17 +1817,21 @@ async fn handle_request(
         let response = call_js_handler(&handler.callback, ctx).await;
         let mut our_response = response_data_to_response(response);
 
-        // Apply middleware chain (after)
-        let middleware = state.middleware.read().await;
-        middleware.run_after(&request, &mut our_response);
+        // Apply middleware chain (after) - only if middleware exists
+        if let Some(ref req) = request {
+            let middleware = state.middleware.read().await;
+            middleware.run_after(req, &mut our_response);
+        }
 
         return Ok(to_hyper_response(our_response));
     }
 
     // 4. No route matched - 404
     let mut our_response = Response::not_found();
-    let middleware = state.middleware.read().await;
-    middleware.run_after(&request, &mut our_response);
+    if let Some(ref req) = request {
+        let middleware = state.middleware.read().await;
+        middleware.run_after(req, &mut our_response);
+    }
 
     Ok(to_hyper_response(our_response))
 }

@@ -71,6 +71,12 @@ impl MiddlewareChain {
         self.middlewares.push(Box::new(middleware));
     }
 
+    /// Check if middleware chain is empty
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.middlewares.is_empty()
+    }
+
     /// Run before middlewares, return early response if any
     pub fn run_before(&self, req: &mut Request) -> Option<Response> {
         for m in &self.middlewares {
