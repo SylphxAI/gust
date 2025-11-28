@@ -7,8 +7,8 @@
       "devDependencies": {
         "@biomejs/biome": "^2.3.8",
         "@sylphx/biome-config": "^0.4.0",
-        "@sylphx/bump": "^1.2.0",
-        "@sylphx/doctor": "^1.24.1",
+        "@sylphx/bump": "^1.3.1",
+        "@sylphx/doctor": "^1.24.0",
         "@sylphx/tsconfig": "^0.3.0",
         "@types/bun": "latest",
         "@types/node": "^24.10.1",
@@ -19,14 +19,14 @@
     },
     "packages/core": {
       "name": "@sylphx/gust-core",
-      "version": "0.1.2",
+      "version": "0.1.6",
       "devDependencies": {
         "bunup": "^0.16.10",
       },
     },
     "packages/serve": {
       "name": "@sylphx/gust",
-      "version": "0.1.3",
+      "version": "0.1.7",
       "dependencies": {
         "@sylphx/gust-core": "workspace:*",
       },
@@ -179,7 +179,7 @@
 
     "@sylphx/biome-config": ["@sylphx/biome-config@0.4.0", "", { "peerDependencies": { "@biomejs/biome": "^2.0.0" } }, "sha512-fvIZ5H61VfbQzp2X2E5FoRtzUBS03rGvuaxby6MoP4fmgXaYS35CWgU+zswKoo2DAriBbIKfWkYsT/Bn2ih0HA=="],
 
-    "@sylphx/bump": ["@sylphx/bump@1.2.0", "", { "dependencies": { "citty": "^0.1.6", "consola": "^3.4.2", "defu": "^6.1.4", "picocolors": "^1.1.1", "semver": "^7.6.3", "zx": "^8.8.5" }, "bin": { "bump": "dist/cli.js" } }, "sha512-pcAQaB4IrMlO/Trn5etPGvVITQDEDQGrfOIu+O6PoYdjkYEX3ipfBPmZEyBE85gWJgZ8z68BlFgf83XVB5csWw=="],
+    "@sylphx/bump": ["@sylphx/bump@1.3.1", "", { "dependencies": { "citty": "^0.1.6", "consola": "^3.4.2", "defu": "^6.1.4", "picocolors": "^1.1.1", "semver": "^7.6.3", "zx": "^8.8.5" }, "bin": { "bump": "dist/cli.js" } }, "sha512-J1JubxGY5osqwoJBCbzladm4DF2gpmEMm9R4bxWQ/205OK21LHc0YxAEF0UszasLqo9JNnrabno3iFgguXK0lQ=="],
 
     "@sylphx/doctor": ["@sylphx/doctor@1.24.1", "", { "dependencies": { "citty": "^0.1.6", "consola": "^3.4.2", "defu": "^6.1.4", "jiti": "^2.4.2", "picocolors": "^1.1.1" }, "bin": { "doctor": "dist/cli.js" } }, "sha512-lBxibz7xRy+doP0EgABW6G+NspmFbpaLs1ANyx6J0pdB6ymsigCQGXXuruemgtuvcaC4+IUp28LQ2BlYU24hYA=="],
 
