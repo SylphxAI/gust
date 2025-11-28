@@ -2,6 +2,12 @@
  * Serve - High performance HTTP/HTTPS server
  * Uses Node.js net/tls + WASM HTTP parser
  * Runtime-agnostic: works with Bun, Node.js, Deno
+ *
+ * Performance optimizations:
+ * - Single socket.write() for buffered responses
+ * - Lazy timer creation (only when timeout > 0)
+ * - Buffer reuse to minimize allocations
+ * - Pre-cached status lines
  */
 
 import { createServer, type Server as NetServer, type Socket } from 'node:net'
@@ -19,6 +25,28 @@ const DEFAULT_MAX_REQUESTS = 100
 const DEFAULT_REQUEST_TIMEOUT = 30000
 // Default header size limit (8KB)
 const DEFAULT_MAX_HEADER_SIZE = 8192
+
+// Pre-cached status lines for common status codes (hot path optimization)
+const STATUS_LINES: Record<number, string> = {
+	200: 'HTTP/1.1 200 OK\r\n',
+	201: 'HTTP/1.1 201 Created\r\n',
+	204: 'HTTP/1.1 204 No Content\r\n',
+	301: 'HTTP/1.1 301 Moved Permanently\r\n',
+	302: 'HTTP/1.1 302 Found\r\n',
+	304: 'HTTP/1.1 304 Not Modified\r\n',
+	400: 'HTTP/1.1 400 Bad Request\r\n',
+	401: 'HTTP/1.1 401 Unauthorized\r\n',
+	403: 'HTTP/1.1 403 Forbidden\r\n',
+	404: 'HTTP/1.1 404 Not Found\r\n',
+	500: 'HTTP/1.1 500 Internal Server Error\r\n',
+}
+
+// Connection header values (avoid string allocation)
+const CONN_KEEP_ALIVE = 'connection: keep-alive\r\n'
+const CONN_CLOSE = 'connection: close\r\n'
+
+// Empty buffer for reuse
+const EMPTY_BUFFER = Buffer.allocUnsafe(0)
 
 export type TlsOptions = {
 	/** TLS certificate (PEM format) */
@@ -200,22 +228,21 @@ const handleConnection = (
 	config: ConnectionConfig
 ): void => {
 	const state: ConnectionState = {
-		buffer: Buffer.alloc(0),
+		buffer: EMPTY_BUFFER,
 		requestCount: 0,
 		idleTimer: null,
 		requestTimer: null,
 		isProcessing: false,
 	}
 
-	// Reset idle timer
-	const resetIdleTimer = () => {
-		if (state.idleTimer) {
-			clearTimeout(state.idleTimer)
-		}
-		state.idleTimer = setTimeout(() => {
-			socket.end()
-		}, config.keepAliveTimeout)
-	}
+	// Lazy idle timer - only create if timeout > 0
+	const resetIdleTimer =
+		config.keepAliveTimeout > 0
+			? () => {
+					if (state.idleTimer) clearTimeout(state.idleTimer)
+					state.idleTimer = setTimeout(() => socket.end(), config.keepAliveTimeout)
+				}
+			: () => {} // no-op if timeout disabled
 
 	// Clear all timers
 	const clearTimers = () => {
@@ -229,21 +256,21 @@ const handleConnection = (
 		}
 	}
 
-	// Start request timeout
-	const startRequestTimeout = () => {
-		if (state.requestTimer) {
-			clearTimeout(state.requestTimer)
-		}
-		state.requestTimer = setTimeout(() => {
-			if (state.isProcessing) {
-				clearTimers()
-				socket.write('HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n')
-				socket.end()
-			}
-		}, config.requestTimeout)
-	}
+	// Lazy request timeout - only create if timeout > 0
+	const startRequestTimeout =
+		config.requestTimeout > 0
+			? () => {
+					if (state.requestTimer) clearTimeout(state.requestTimer)
+					state.requestTimer = setTimeout(() => {
+						if (state.isProcessing) {
+							clearTimers()
+							socket.write('HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n')
+							socket.end()
+						}
+					}, config.requestTimeout)
+				}
+			: () => {} // no-op if timeout disabled
 
-	// Clear request timeout
 	const clearRequestTimeout = () => {
 		if (state.requestTimer) {
 			clearTimeout(state.requestTimer)
@@ -258,7 +285,8 @@ const handleConnection = (
 		// Reset idle timer on data
 		resetIdleTimer()
 
-		state.buffer = Buffer.concat([state.buffer, chunk])
+		// Optimization: avoid Buffer.concat when buffer is empty
+		state.buffer = state.buffer.length === 0 ? chunk : Buffer.concat([state.buffer, chunk])
 
 		// Check header size limit (before complete parse)
 		const headerEnd = state.buffer.indexOf('\r\n\r\n')
@@ -301,10 +329,7 @@ const handleConnection = (
 
 				// Determine if keep-alive
 				const connectionHeader = headers.connection?.toLowerCase() || ''
-				const isHttp11 = true // We assume HTTP/1.1
-				const keepAlive = isHttp11
-					? connectionHeader !== 'close'
-					: connectionHeader === 'keep-alive'
+				const keepAlive = connectionHeader !== 'close' // HTTP/1.1 default is keep-alive
 
 				// Check if we should close after this request
 				const shouldClose = !keepAlive || state.requestCount >= config.maxRequests
@@ -319,7 +344,7 @@ const handleConnection = (
 				const response = await handler(ctx)
 				clearRequestTimeout()
 				state.isProcessing = false
-				await sendResponse(socket, response, shouldClose)
+				sendResponse(socket, response, shouldClose)
 
 				if (shouldClose) {
 					clearTimers()
@@ -328,21 +353,19 @@ const handleConnection = (
 				}
 
 				// Remove processed request from buffer
-				state.buffer = state.buffer.subarray(requestEnd)
+				state.buffer =
+					state.buffer.length > requestEnd ? state.buffer.subarray(requestEnd) : EMPTY_BUFFER
 			} catch (error) {
 				config.onError?.(error as Error)
 				clearTimers()
-				await sendResponse(socket, serverError(), true)
+				sendResponse(socket, serverError(), true)
 				socket.end()
 				return
 			}
 		}
 	})
 
-	socket.on('close', () => {
-		clearTimers()
-	})
-
+	socket.on('close', clearTimers)
 	socket.on('error', (err) => {
 		clearTimers()
 		config.onError?.(err)
@@ -351,99 +374,88 @@ const handleConnection = (
 
 /**
  * Send HTTP response with optional keep-alive
- * Supports both buffered and streaming (AsyncIterable) bodies
+ * Optimized for single write when possible
  */
-const sendResponse = async (
+const sendResponse = (
 	socket: Socket | TLSSocket,
 	response: ServerResponse,
 	shouldClose: boolean
-): Promise<void> => {
-	const statusText = getStatusText(response.status)
-	let head = `HTTP/1.1 ${response.status} ${statusText}\r\n`
-
-	// Add headers
-	for (const [key, value] of Object.entries(response.headers)) {
-		head += `${key}: ${value}\r\n`
-	}
-
+): void => {
 	// Check if body is streaming (AsyncIterable)
 	if (isStreamingBody(response.body)) {
-		// Streaming response - use chunked transfer encoding
-		head += 'transfer-encoding: chunked\r\n'
-		head += `connection: ${shouldClose ? 'close' : 'keep-alive'}\r\n`
-		head += '\r\n'
+		sendStreamingResponse(socket, response, shouldClose)
+		return
+	}
 
-		socket.write(head)
+	// Buffered response - build complete response and send in single write
+	const statusLine = STATUS_LINES[response.status] || `HTTP/1.1 ${response.status} Unknown\r\n`
+	const connHeader = shouldClose ? CONN_CLOSE : CONN_KEEP_ALIVE
+	const body = response.body
+	const bodyLen = body !== null ? Buffer.byteLength(body) : 0
 
-		// Stream chunks with backpressure handling
-		try {
-			for await (const chunk of response.body) {
-				if (!socket.writable) break
+	// Build headers string
+	let headers = statusLine
+	for (const key in response.headers) {
+		headers += `${key}: ${response.headers[key]}\r\n`
+	}
+	headers += `content-length: ${bodyLen}\r\n`
+	headers += connHeader
+	headers += '\r\n'
 
-				// Write chunk in chunked encoding format: size\r\n + data + \r\n
-				const sizeHex = chunk.length.toString(16)
-				const canWrite = socket.write(`${sizeHex}\r\n`)
-				socket.write(chunk)
-				socket.write('\r\n')
-
-				// Handle backpressure
-				if (!canWrite) {
-					await new Promise<void>((resolve) => socket.once('drain', resolve))
-				}
-			}
-
-			// Send terminating chunk
-			socket.write('0\r\n\r\n')
-		} catch {
-			// Stream error - close connection
-			socket.destroy()
-		}
+	// Single write: headers + body combined
+	if (body !== null && bodyLen > 0) {
+		const headerBuf = Buffer.from(headers)
+		const bodyBuf = typeof body === 'string' ? Buffer.from(body) : body
+		socket.write(Buffer.concat([headerBuf, bodyBuf]))
 	} else {
-		// Buffered response - use content-length
-		if (response.body !== null) {
-			const bodyLen = Buffer.byteLength(response.body)
-			head += `content-length: ${bodyLen}\r\n`
-		} else {
-			head += 'content-length: 0\r\n'
-		}
-
-		head += `connection: ${shouldClose ? 'close' : 'keep-alive'}\r\n`
-		head += '\r\n'
-
-		socket.write(head)
-		if (response.body !== null) {
-			socket.write(response.body)
-		}
+		socket.write(headers)
 	}
 }
 
 /**
- * Get status text for HTTP status code
+ * Send streaming response with chunked transfer encoding
  */
-const getStatusText = (status: number): string => {
-	const texts: Record<number, string> = {
-		200: 'OK',
-		201: 'Created',
-		204: 'No Content',
-		301: 'Moved Permanently',
-		302: 'Found',
-		303: 'See Other',
-		304: 'Not Modified',
-		307: 'Temporary Redirect',
-		308: 'Permanent Redirect',
-		400: 'Bad Request',
-		401: 'Unauthorized',
-		403: 'Forbidden',
-		404: 'Not Found',
-		405: 'Method Not Allowed',
-		408: 'Request Timeout',
-		413: 'Content Too Large',
-		429: 'Too Many Requests',
-		431: 'Request Header Fields Too Large',
-		500: 'Internal Server Error',
-		502: 'Bad Gateway',
-		503: 'Service Unavailable',
-		504: 'Gateway Timeout',
+const sendStreamingResponse = async (
+	socket: Socket | TLSSocket,
+	response: ServerResponse,
+	shouldClose: boolean
+): Promise<void> => {
+	const statusLine = STATUS_LINES[response.status] || `HTTP/1.1 ${response.status} Unknown\r\n`
+	const connHeader = shouldClose ? CONN_CLOSE : CONN_KEEP_ALIVE
+
+	let headers = statusLine
+	for (const key in response.headers) {
+		headers += `${key}: ${response.headers[key]}\r\n`
 	}
-	return texts[status] || 'Unknown'
+	headers += 'transfer-encoding: chunked\r\n'
+	headers += connHeader
+	headers += '\r\n'
+
+	socket.write(headers)
+
+	// Stream chunks with backpressure handling
+	try {
+		for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+			if (!socket.writable) break
+
+			// Combine chunk header + data + trailer into single write
+			const sizeHex = chunk.length.toString(16)
+			const chunkBuf = Buffer.allocUnsafe(sizeHex.length + 2 + chunk.length + 2)
+			chunkBuf.write(sizeHex, 0)
+			chunkBuf.write('\r\n', sizeHex.length)
+			chunkBuf.set(chunk, sizeHex.length + 2)
+			chunkBuf.write('\r\n', sizeHex.length + 2 + chunk.length)
+
+			const canWrite = socket.write(chunkBuf)
+			if (!canWrite) {
+				await new Promise<void>((resolve) => socket.once('drain', resolve))
+			}
+		}
+
+		// Send terminating chunk
+		socket.write('0\r\n\r\n')
+	} catch {
+		// Stream error - close connection
+		socket.destroy()
+	}
 }
