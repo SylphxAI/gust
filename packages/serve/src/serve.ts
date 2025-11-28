@@ -18,7 +18,7 @@ import type { Handler, ServerResponse, WasmCore } from '@sylphx/gust-core'
 import { getWasm, initWasm, isStreamingBody, serverError } from '@sylphx/gust-core'
 import type { Context } from './context'
 import { createContext, parseHeaders } from './context'
-import { isNativeAvailable, loadNativeBinding } from './native'
+import { isNativeAvailable, isTlsAvailable, loadNativeBinding } from './native'
 
 // Default keep-alive timeout (5 seconds)
 const DEFAULT_KEEP_ALIVE_TIMEOUT = 5000
@@ -72,8 +72,12 @@ export type ServeOptions = {
 	readonly maxRequestsPerConnection?: number
 	readonly requestTimeout?: number
 	readonly maxHeaderSize?: number
+	/** Maximum body size in bytes (default: 1MB) */
+	readonly maxBodySize?: number
 	/** TLS configuration for HTTPS */
 	readonly tls?: TlsOptions
+	/** Enable HTTP/2 (only with TLS) */
+	readonly http2?: boolean
 }
 
 export type Server = {
@@ -93,7 +97,7 @@ export type Server = {
  *
  * Architecture:
  * - Primary: Rust native server via napi-rs (~220k req/s) - full feature support
- * - Fallback: Node.js net/tls + WASM HTTP parser (edge/serverless, TLS)
+ * - Fallback: Node.js net/tls + WASM HTTP parser (edge/serverless)
  *
  * The native server transparently handles all dynamic routes with full context
  * (method, path, params, query, headers, body).
@@ -103,14 +107,15 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
 	const hostname = options.hostname ?? '0.0.0.0'
 	const useTls = !!options.tls
 
-	// TLS requires pure JS (native doesn't support TLS yet)
-	if (useTls) {
-		return serveJs(options, port, hostname, useTls)
-	}
-
-	// Try native server first (transparent, full feature support)
+	// Try native server first (supports both HTTP and HTTPS)
 	if (isNativeAvailable()) {
-		const nativeServer = await serveNative(options, port, hostname)
+		// For TLS, check if native TLS is available
+		if (useTls && !isTlsAvailable()) {
+			// Native doesn't have TLS support compiled in, use JS fallback
+			return serveJs(options, port, hostname, useTls)
+		}
+
+		const nativeServer = await serveNative(options, port, hostname, useTls)
 		if (nativeServer) {
 			return nativeServer
 		}
@@ -127,11 +132,13 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
  * - All HTTP parsing and routing happens in Rust
  * - JS handler is called via threadsafe callback for dynamic routes
  * - Middleware (CORS, rate limiting, security) runs in Rust
+ * - Supports TLS/HTTPS when compiled with 'tls' feature
  */
 const serveNative = async (
 	options: ServeOptions,
 	port: number,
-	hostname: string
+	hostname: string,
+	useTls: boolean
 ): Promise<Server | null> => {
 	const binding = loadNativeBinding()
 	if (!binding) return null
@@ -140,6 +147,50 @@ const serveNative = async (
 
 	try {
 		const server = new binding.GustServer()
+
+		// Enable TLS if configured
+		if (useTls && options.tls) {
+			const tlsConfig: {
+				certPath?: string
+				keyPath?: string
+				cert?: string
+				key?: string
+			} = {}
+
+			// Convert cert/key to string if Buffer
+			if (typeof options.tls.cert === 'string') {
+				tlsConfig.cert = options.tls.cert
+			} else if (Buffer.isBuffer(options.tls.cert)) {
+				tlsConfig.cert = options.tls.cert.toString('utf-8')
+			}
+
+			if (typeof options.tls.key === 'string') {
+				tlsConfig.key = options.tls.key
+			} else if (Buffer.isBuffer(options.tls.key)) {
+				tlsConfig.key = options.tls.key.toString('utf-8')
+			}
+
+			await server.enableTls(tlsConfig)
+
+			// Enable HTTP/2 if requested (only with TLS)
+			if (options.http2) {
+				await server.enableHttp2()
+			}
+		}
+
+		// Apply timeout and limit configurations
+		if (options.requestTimeout !== undefined) {
+			await server.setRequestTimeout(options.requestTimeout)
+		}
+		if (options.maxBodySize !== undefined) {
+			await server.setMaxBodySize(options.maxBodySize)
+		}
+		if (options.keepAliveTimeout !== undefined) {
+			await server.setKeepAliveTimeout(options.keepAliveTimeout)
+		}
+		if (options.maxHeaderSize !== undefined) {
+			await server.setMaxHeaderSize(options.maxHeaderSize)
+		}
 
 		// Set fallback handler that routes all requests to JS handler
 		// This is the native-first architecture: Rust handles HTTP, JS handles business logic
@@ -201,28 +252,24 @@ const serveNative = async (
 			}
 		})
 
-		// Start server (non-blocking)
-		server.serve(port).catch((err) => {
+		// Start server with hostname (non-blocking)
+		server.serveWithHostname(port, hostname).catch((err) => {
 			options.onError?.(err as Error)
 		})
 
-		options.onListen?.({ port, hostname, tls: false })
+		options.onListen?.({ port, hostname, tls: useTls })
 
 		return {
 			port,
 			hostname,
-			tls: false,
-			connections: () => 0, // Native tracks connections internally
-			stop: () =>
-				new Promise((resolve) => {
-					server.shutdown()
-					resolve()
-				}),
-			shutdown: () =>
-				new Promise((resolve) => {
-					server.shutdown()
-					resolve()
-				}),
+			tls: useTls,
+			connections: () => server.activeConnections(),
+			stop: async () => {
+				await server.shutdown()
+			},
+			shutdown: async (timeout = 30000) => {
+				await server.gracefulShutdown(timeout)
+			},
 		}
 	} catch (err) {
 		options.onError?.(err as Error)

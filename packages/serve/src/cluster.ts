@@ -1,11 +1,23 @@
 /**
- * Cluster Mode
- * Multi-process server for utilizing all CPU cores
+ * Cluster Mode - Multi-process server scaling
+ *
+ * Uses Node.js cluster module to spawn multiple worker processes,
+ * each running their own instance of the server.
+ *
+ * Benefits:
+ * - Utilize multiple CPU cores
+ * - Process isolation (crash in one worker doesn't affect others)
+ * - Zero-downtime restarts (rolling restart)
+ *
+ * Architecture:
+ * - Primary process: Manages workers, handles signals, coordinates restarts
+ * - Worker processes: Handle actual HTTP requests via native server
  */
 
 import cluster, { type Worker as ClusterWorker } from 'node:cluster'
 import { EventEmitter } from 'node:events'
 import { cpus } from 'node:os'
+import { getRecommendedWorkers, isNativeAvailable } from './native'
 import type { ServeOptions, Server } from './serve'
 
 // ============================================================================
@@ -13,7 +25,7 @@ import type { ServeOptions, Server } from './serve'
 // ============================================================================
 
 export type ClusterOptions = {
-	/** Number of workers (default: CPU count) */
+	/** Number of workers (default: native recommended or CPU count) */
 	readonly workers?: number
 	/** Restart workers on crash (default: true) */
 	readonly autoRestart?: boolean
@@ -27,6 +39,22 @@ export type ClusterOptions = {
 	readonly onWorkerExit?: (worker: ClusterWorker, code: number, signal: string) => void
 	/** On all workers ready */
 	readonly onReady?: () => void
+	/** On rolling restart complete */
+	readonly onRestart?: () => void
+	/** On scale change */
+	readonly onScale?: (workerCount: number) => void
+}
+
+/**
+ * Get optimal worker count based on native recommendation or CPU count
+ */
+export const getOptimalWorkerCount = (): number => {
+	// Use native recommendation if available (capped at 8)
+	const nativeRecommended = isNativeAvailable() ? getRecommendedWorkers() : 0
+	if (nativeRecommended > 0) return nativeRecommended
+
+	// Fallback: CPU count, capped at 8
+	return Math.min(cpus().length, 8)
 }
 
 export type ClusterInfo = {
@@ -57,7 +85,7 @@ export class ClusterManager extends EventEmitter {
 
 	constructor(options: ClusterOptions = {}) {
 		super()
-		this.workerCount = options.workers ?? cpus().length
+		this.workerCount = options.workers ?? getOptimalWorkerCount()
 		this.autoRestart = options.autoRestart ?? true
 		this.maxRestarts = options.maxRestarts ?? 5
 		this.shutdownTimeout = options.shutdownTimeout ?? 30000
@@ -65,6 +93,8 @@ export class ClusterManager extends EventEmitter {
 		if (options.onWorkerStart) this.on('worker:start', options.onWorkerStart)
 		if (options.onWorkerExit) this.on('worker:exit', options.onWorkerExit)
 		if (options.onReady) this.on('ready', options.onReady)
+		if (options.onRestart) this.on('restart', options.onRestart)
+		if (options.onScale) this.on('scale', options.onScale)
 	}
 
 	/**
@@ -203,6 +233,116 @@ export class ClusterManager extends EventEmitter {
 		if (!worker) return false
 		worker.send(message)
 		return true
+	}
+
+	/**
+	 * Rolling restart - zero-downtime restart of all workers
+	 *
+	 * Restarts workers one at a time, waiting for each new worker
+	 * to be ready before stopping the old one.
+	 */
+	async rollingRestart(): Promise<void> {
+		if (this.isShuttingDown) return
+
+		console.log('Starting rolling restart...')
+		const workerIds = Array.from(this.workers.keys())
+
+		for (const workerId of workerIds) {
+			const oldWorker = this.workers.get(workerId)
+			if (!oldWorker) continue
+
+			// Fork new worker
+			const newWorker = cluster.fork()
+			this.workers.set(newWorker.id, newWorker)
+
+			// Wait for new worker to be ready
+			await new Promise<void>((resolve, reject) => {
+				const timeout = setTimeout(() => {
+					reject(new Error('New worker failed to become ready'))
+				}, 30000)
+
+				const onMessage = (msg: unknown) => {
+					if (msg === 'ready') {
+						clearTimeout(timeout)
+						newWorker.off('message', onMessage)
+						resolve()
+					}
+				}
+				newWorker.on('message', onMessage)
+			})
+
+			// Gracefully shutdown old worker
+			oldWorker.send('shutdown')
+			await new Promise<void>((resolve) => {
+				const timeout = setTimeout(() => {
+					oldWorker.kill('SIGKILL')
+					resolve()
+				}, 10000)
+
+				oldWorker.on('exit', () => {
+					clearTimeout(timeout)
+					resolve()
+				})
+			})
+			this.workers.delete(workerId)
+
+			console.log(`Worker ${workerId} replaced with ${newWorker.id}`)
+		}
+
+		console.log('Rolling restart complete')
+		this.emit('restart')
+	}
+
+	/**
+	 * Scale up - add workers
+	 */
+	scaleUp(count = 1): void {
+		for (let i = 0; i < count; i++) {
+			this.forkWorker()
+		}
+		console.log(`Scaled up by ${count} workers (total: ${this.workers.size})`)
+		this.emit('scale', this.workers.size)
+	}
+
+	/**
+	 * Scale down - remove workers
+	 */
+	async scaleDown(count = 1): Promise<void> {
+		const workerIds = Array.from(this.workers.keys()).slice(0, count)
+
+		for (const workerId of workerIds) {
+			const worker = this.workers.get(workerId)
+			if (!worker) continue
+
+			worker.send('shutdown')
+			await new Promise<void>((resolve) => {
+				const timeout = setTimeout(() => {
+					worker.kill('SIGKILL')
+					resolve()
+				}, 10000)
+
+				worker.on('exit', () => {
+					clearTimeout(timeout)
+					resolve()
+				})
+			})
+			this.workers.delete(workerId)
+		}
+
+		console.log(`Scaled down by ${count} workers (total: ${this.workers.size})`)
+		this.emit('scale', this.workers.size)
+	}
+
+	/**
+	 * Set target worker count (scales up or down as needed)
+	 */
+	async setWorkerCount(count: number): Promise<void> {
+		const current = this.workers.size
+		if (count > current) {
+			this.scaleUp(count - current)
+		} else if (count < current) {
+			await this.scaleDown(current - count)
+		}
 	}
 }
 

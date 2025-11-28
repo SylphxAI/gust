@@ -103,6 +103,14 @@ export interface NativeServerConfig {
 	tls?: NativeTlsConfig
 	/** Enable HTTP/2 (requires TLS) */
 	http2?: boolean
+	/** Request timeout in milliseconds (default: 30000) */
+	requestTimeoutMs?: number
+	/** Maximum body size in bytes (default: 1MB) */
+	maxBodySize?: number
+	/** Keep-alive timeout in milliseconds (default: 5000) */
+	keepAliveTimeoutMs?: number
+	/** Maximum header size in bytes (default: 8KB) */
+	maxHeaderSize?: number
 }
 
 // ============================================================================
@@ -257,6 +265,39 @@ export interface NativeMetricsCollector {
 	toPrometheus(): string
 }
 
+// ============================================================================
+// WebSocket Frame Types
+// ============================================================================
+
+/** WebSocket frame opcode */
+export type WebSocketOpcode = 'continuation' | 'text' | 'binary' | 'close' | 'ping' | 'pong'
+
+/** Parsed WebSocket frame */
+export interface WebSocketFrame {
+	/** Frame opcode */
+	opcode: string
+	/** Is this the final frame in a message? */
+	fin: boolean
+	/** Payload data (unmasked) */
+	payload: number[]
+	/** Total bytes consumed from input buffer */
+	bytesConsumed: number
+	/** For close frames: the close code (if present) */
+	closeCode?: number
+	/** For close frames: the close reason (if present) */
+	closeReason?: string
+}
+
+/** Result of parsing WebSocket frame */
+export interface WebSocketParseResult {
+	/** The parsed frame (if complete) */
+	frame?: WebSocketFrame
+	/** Error message (if parse failed) */
+	error?: string
+	/** Needs more data? */
+	incomplete: boolean
+}
+
 // Native binding interface (from @sylphx/gust-napi)
 export interface NativeBinding {
 	// Server
@@ -317,6 +358,18 @@ export interface NativeBinding {
 		key: string,
 		protocol?: string
 	) => { status: number; headers: Record<string, string> }
+	// WebSocket Frame Encoding/Decoding
+	parseWebsocketFrame: (data: number[]) => WebSocketParseResult
+	encodeWebsocketText: (text: string, fin?: boolean) => number[]
+	encodeWebsocketBinary: (data: number[], fin?: boolean) => number[]
+	encodeWebsocketPing: (data?: number[]) => number[]
+	encodeWebsocketPong: (data?: number[]) => number[]
+	encodeWebsocketClose: (code?: number, reason?: string) => number[]
+	encodeWebsocketContinuation: (data: number[], fin: boolean) => number[]
+	maskWebsocketPayload: (data: number[], maskKey: number[]) => number[]
+	generateWebsocketMask: () => number[]
+	websocketCloseCodes: () => Record<string, number>
+	isValidCloseCode: (code: number) => boolean
 }
 
 /** Request context passed to JS handlers */
@@ -364,12 +417,29 @@ export interface NativeServer {
 	enableTls(config: NativeTlsConfig): Promise<void>
 	/** Enable HTTP/2 */
 	enableHttp2(): Promise<void>
+	/** Set request timeout in milliseconds */
+	setRequestTimeout(timeoutMs: number): Promise<void>
+	/** Set maximum body size in bytes */
+	setMaxBodySize(maxBytes: number): Promise<void>
+	/** Set keep-alive timeout in milliseconds */
+	setKeepAliveTimeout(timeoutMs: number): Promise<void>
+	/** Set maximum header size in bytes */
+	setMaxHeaderSize(maxBytes: number): Promise<void>
 	/** Start server on port */
 	serve(port: number): Promise<void>
 	/** Start server with custom hostname */
 	serveWithHostname(port: number, hostname: string): Promise<void>
-	/** Shutdown the server */
+	/** Shutdown the server immediately */
 	shutdown(): Promise<void>
+	/** Graceful shutdown - waits for connections to drain
+	 *  @param timeoutMs - Maximum time to wait (0 = no timeout)
+	 *  @returns true if all connections drained, false if timeout reached
+	 */
+	gracefulShutdown(timeoutMs: number): Promise<boolean>
+	/** Get number of active connections */
+	activeConnections(): number
+	/** Check if server is shutting down */
+	isShuttingDown(): boolean
 }
 
 // ============================================================================
@@ -508,7 +578,17 @@ export interface NativeServeOptions {
 export interface NativeServerHandle {
 	readonly port: number
 	readonly hostname: string
+	/** Stop the server immediately */
 	readonly stop: () => void
+	/** Graceful shutdown - waits for connections to drain
+	 *  @param timeoutMs - Maximum time to wait in ms (default: 30000)
+	 *  @returns true if all connections drained, false if timeout reached
+	 */
+	readonly gracefulStop: (timeoutMs?: number) => Promise<boolean>
+	/** Get number of active connections */
+	readonly activeConnections: () => number
+	/** Check if server is shutting down */
+	readonly isShuttingDown: () => boolean
 	readonly isNative: true
 }
 
@@ -547,6 +627,9 @@ export const nativeServe = async (
 			hostname,
 			isNative: true,
 			stop: () => server.shutdown(),
+			gracefulStop: (timeoutMs = 30000) => server.gracefulShutdown(timeoutMs),
+			activeConnections: () => server.activeConnections(),
+			isShuttingDown: () => server.isShuttingDown(),
 		}
 	} catch (err) {
 		onError?.(err as Error)
@@ -826,9 +909,10 @@ export const nativeServeWithConfig = async (
 			port,
 			hostname,
 			isNative: true,
-			stop: () => {
-				server.shutdown()
-			},
+			stop: () => server.shutdown(),
+			gracefulStop: (timeoutMs = 30000) => server.gracefulShutdown(timeoutMs),
+			activeConnections: () => server.activeConnections(),
+			isShuttingDown: () => server.isShuttingDown(),
 		}
 	} catch (err) {
 		onError?.(err as Error)
@@ -1156,4 +1240,194 @@ export const nativeCreateWebSocketUpgradeResponse = (
 	const binding = loadNative()
 	if (!binding) return null
 	return binding.createWebsocketUpgradeResponse(key, protocol)
+}
+
+// ============================================================================
+// WebSocket Frame Encoding/Decoding
+// ============================================================================
+
+/**
+ * Parse a WebSocket frame from raw bytes
+ *
+ * Handles frame decoding according to RFC 6455:
+ * - Reads FIN, opcode, mask, payload length
+ * - Unmasks payload data (client->server frames are always masked)
+ * - Handles extended payload lengths (16-bit and 64-bit)
+ *
+ * @example
+ * ```ts
+ * const result = nativeParseWebSocketFrame(Array.from(buffer))
+ * if (result.frame) {
+ *   console.log('Opcode:', result.frame.opcode)
+ *   console.log('Payload:', Buffer.from(result.frame.payload))
+ * } else if (result.incomplete) {
+ *   // Need more data
+ * } else if (result.error) {
+ *   console.error('Parse error:', result.error)
+ * }
+ * ```
+ */
+export const nativeParseWebSocketFrame = (data: number[] | Buffer): WebSocketParseResult | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	const arr = Array.isArray(data) ? data : Array.from(data)
+	return binding.parseWebsocketFrame(arr)
+}
+
+/**
+ * Encode a WebSocket text frame
+ *
+ * @example
+ * ```ts
+ * const frame = nativeEncodeWebSocketText('Hello, World!')
+ * socket.write(Buffer.from(frame))
+ * ```
+ */
+export const nativeEncodeWebSocketText = (text: string, fin = true): Buffer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	const arr = binding.encodeWebsocketText(text, fin)
+	return Buffer.from(arr)
+}
+
+/**
+ * Encode a WebSocket binary frame
+ */
+export const nativeEncodeWebSocketBinary = (data: number[] | Buffer, fin = true): Buffer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	const arr = Array.isArray(data) ? data : Array.from(data)
+	const result = binding.encodeWebsocketBinary(arr, fin)
+	return Buffer.from(result)
+}
+
+/**
+ * Encode a WebSocket ping frame
+ *
+ * @example
+ * ```ts
+ * const pingFrame = nativeEncodeWebSocketPing()
+ * socket.write(pingFrame)
+ * ```
+ */
+export const nativeEncodeWebSocketPing = (data?: number[] | Buffer): Buffer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
+	const result = binding.encodeWebsocketPing(arr)
+	return Buffer.from(result)
+}
+
+/**
+ * Encode a WebSocket pong frame (response to ping)
+ *
+ * @example
+ * ```ts
+ * // Echo back ping payload in pong
+ * const pongFrame = nativeEncodeWebSocketPong(pingFrame.payload)
+ * socket.write(pongFrame)
+ * ```
+ */
+export const nativeEncodeWebSocketPong = (data?: number[] | Buffer): Buffer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
+	const result = binding.encodeWebsocketPong(arr)
+	return Buffer.from(result)
+}
+
+/**
+ * Encode a WebSocket close frame
+ *
+ * @param code - Close status code (1000 = normal, 1001 = going away, etc.)
+ * @param reason - Optional UTF-8 close reason string
+ *
+ * @example
+ * ```ts
+ * const closeFrame = nativeEncodeWebSocketClose(1000, 'Goodbye')
+ * socket.write(closeFrame)
+ * ```
+ */
+export const nativeEncodeWebSocketClose = (code?: number, reason?: string): Buffer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	const result = binding.encodeWebsocketClose(code, reason)
+	return Buffer.from(result)
+}
+
+/**
+ * Encode a WebSocket continuation frame (for fragmented messages)
+ */
+export const nativeEncodeWebSocketContinuation = (
+	data: number[] | Buffer,
+	fin: boolean
+): Buffer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	const arr = Array.isArray(data) ? data : Array.from(data)
+	const result = binding.encodeWebsocketContinuation(arr, fin)
+	return Buffer.from(result)
+}
+
+/**
+ * Mask/unmask WebSocket payload data
+ *
+ * The same XOR operation is used for both masking and unmasking.
+ * Client->server frames must be masked, server->client must not be.
+ */
+export const nativeMaskWebSocketPayload = (
+	data: number[] | Buffer,
+	maskKey: number[]
+): Buffer | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	const arr = Array.isArray(data) ? data : Array.from(data)
+	const result = binding.maskWebsocketPayload(arr, maskKey)
+	return Buffer.from(result)
+}
+
+/**
+ * Generate a random 4-byte mask key for client->server frames
+ */
+export const nativeGenerateWebSocketMask = (): number[] | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.generateWebsocketMask()
+}
+
+/**
+ * Get standard WebSocket close codes (RFC 6455)
+ *
+ * @returns Object with close code names and values:
+ * - NORMAL (1000): Normal closure
+ * - GOING_AWAY (1001): Endpoint going away
+ * - PROTOCOL_ERROR (1002): Protocol error
+ * - UNSUPPORTED_DATA (1003): Unsupported data type
+ * - NO_STATUS (1005): No status code present
+ * - ABNORMAL (1006): Abnormal closure
+ * - INVALID_PAYLOAD (1007): Invalid payload data
+ * - POLICY_VIOLATION (1008): Policy violation
+ * - MESSAGE_TOO_BIG (1009): Message too big
+ * - EXTENSION_REQUIRED (1010): Extension required
+ * - INTERNAL_ERROR (1011): Internal server error
+ * - TLS_HANDSHAKE (1015): TLS handshake failure
+ */
+export const nativeWebSocketCloseCodes = (): Record<string, number> | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.websocketCloseCodes()
+}
+
+/**
+ * Validate a WebSocket close code
+ *
+ * Valid codes are:
+ * - 1000-1003, 1007-1011: Standard RFC 6455 codes
+ * - 3000-3999: Reserved for libraries/frameworks
+ * - 4000-4999: Reserved for applications
+ */
+export const nativeIsValidCloseCode = (code: number): boolean => {
+	const binding = loadNative()
+	if (!binding) return false
+	return binding.isValidCloseCode(code)
 }

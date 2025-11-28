@@ -156,6 +156,14 @@ pub struct ServerConfig {
     pub tls: Option<TlsConfig>,
     /// Enable HTTP/2 (requires TLS)
     pub http2: Option<bool>,
+    /// Request timeout in milliseconds (default: 30000)
+    pub request_timeout_ms: Option<u32>,
+    /// Maximum body size in bytes (default: 1MB)
+    pub max_body_size: Option<u32>,
+    /// Keep-alive timeout in milliseconds (default: 5000)
+    pub keep_alive_timeout_ms: Option<u32>,
+    /// Maximum header size in bytes (default: 8KB)
+    pub max_header_size: Option<u32>,
 }
 
 // ============================================================================
@@ -942,7 +950,21 @@ struct ServerState {
     tls_config: RwLock<Option<TlsConfig>>,
     /// Enable HTTP/2
     http2_enabled: RwLock<bool>,
+    /// Request timeout in milliseconds
+    request_timeout_ms: RwLock<u32>,
+    /// Maximum body size in bytes
+    max_body_size: RwLock<u32>,
+    /// Keep-alive timeout in milliseconds
+    keep_alive_timeout_ms: RwLock<u32>,
+    /// Maximum header size in bytes
+    max_header_size: RwLock<u32>,
 }
+
+// Default values
+const DEFAULT_REQUEST_TIMEOUT_MS: u32 = 30000;  // 30 seconds
+const DEFAULT_MAX_BODY_SIZE: u32 = 1024 * 1024; // 1MB
+const DEFAULT_KEEP_ALIVE_TIMEOUT_MS: u32 = 5000; // 5 seconds
+const DEFAULT_MAX_HEADER_SIZE: u32 = 8192;      // 8KB
 
 impl ServerState {
     fn new() -> Self {
@@ -954,7 +976,48 @@ impl ServerState {
             compression: RwLock::new(None),
             tls_config: RwLock::new(None),
             http2_enabled: RwLock::new(false),
+            request_timeout_ms: RwLock::new(DEFAULT_REQUEST_TIMEOUT_MS),
+            max_body_size: RwLock::new(DEFAULT_MAX_BODY_SIZE),
+            keep_alive_timeout_ms: RwLock::new(DEFAULT_KEEP_ALIVE_TIMEOUT_MS),
+            max_header_size: RwLock::new(DEFAULT_MAX_HEADER_SIZE),
         }
+    }
+}
+
+/// Connection tracking for graceful shutdown
+struct ConnectionTracker {
+    /// Active connection count
+    active_connections: std::sync::atomic::AtomicU64,
+    /// Shutdown signal received
+    is_shutting_down: std::sync::atomic::AtomicBool,
+}
+
+impl ConnectionTracker {
+    fn new() -> Self {
+        Self {
+            active_connections: std::sync::atomic::AtomicU64::new(0),
+            is_shutting_down: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn increment(&self) {
+        self.active_connections.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn decrement(&self) {
+        self.active_connections.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn get(&self) -> u64 {
+        self.active_connections.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn is_shutting_down(&self) -> bool {
+        self.is_shutting_down.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn start_shutdown(&self) {
+        self.is_shutting_down.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -963,6 +1026,7 @@ impl ServerState {
 pub struct GustServer {
     state: Arc<ServerState>,
     shutdown_tx: Arc<RwLock<Option<tokio::sync::oneshot::Sender<()>>>>,
+    connection_tracker: Arc<ConnectionTracker>,
 }
 
 #[napi]
@@ -973,6 +1037,7 @@ impl GustServer {
         Self {
             state: Arc::new(ServerState::new()),
             shutdown_tx: Arc::new(RwLock::new(None)),
+            connection_tracker: Arc::new(ConnectionTracker::new()),
         }
     }
 
@@ -1006,7 +1071,49 @@ impl GustServer {
             *server.state.http2_enabled.write().await = http2;
         }
 
+        // Apply timeout and limit configurations
+        if let Some(timeout) = config.request_timeout_ms {
+            *server.state.request_timeout_ms.write().await = timeout;
+        }
+        if let Some(max_body) = config.max_body_size {
+            *server.state.max_body_size.write().await = max_body;
+        }
+        if let Some(keep_alive) = config.keep_alive_timeout_ms {
+            *server.state.keep_alive_timeout_ms.write().await = keep_alive;
+        }
+        if let Some(max_header) = config.max_header_size {
+            *server.state.max_header_size.write().await = max_header;
+        }
+
         Ok(server)
+    }
+
+    /// Set request timeout in milliseconds
+    #[napi]
+    pub async fn set_request_timeout(&self, timeout_ms: u32) -> Result<()> {
+        *self.state.request_timeout_ms.write().await = timeout_ms;
+        Ok(())
+    }
+
+    /// Set maximum body size in bytes
+    #[napi]
+    pub async fn set_max_body_size(&self, max_bytes: u32) -> Result<()> {
+        *self.state.max_body_size.write().await = max_bytes;
+        Ok(())
+    }
+
+    /// Set keep-alive timeout in milliseconds
+    #[napi]
+    pub async fn set_keep_alive_timeout(&self, timeout_ms: u32) -> Result<()> {
+        *self.state.keep_alive_timeout_ms.write().await = timeout_ms;
+        Ok(())
+    }
+
+    /// Set maximum header size in bytes
+    #[napi]
+    pub async fn set_max_header_size(&self, max_bytes: u32) -> Result<()> {
+        *self.state.max_header_size.write().await = max_bytes;
+        Ok(())
     }
 
     /// Enable compression middleware
@@ -1278,6 +1385,8 @@ impl GustServer {
         use hyper::service::service_fn;
         use hyper_util::rt::TokioIo;
 
+        let tracker = self.connection_tracker.clone();
+
         tokio::spawn(async move {
             tokio::select! {
                 _ = async {
@@ -1287,7 +1396,16 @@ impl GustServer {
                             Err(_) => continue,
                         };
 
+                        // Reject new connections during shutdown
+                        if tracker.is_shutting_down() {
+                            drop(stream);
+                            continue;
+                        }
+
                         let state = state.clone();
+                        let conn_tracker = tracker.clone();
+                        conn_tracker.increment();
+
                         tokio::spawn(async move {
                             let io = TokioIo::new(stream);
                             let service = service_fn(move |req| {
@@ -1302,13 +1420,19 @@ impl GustServer {
                                 .serve_connection(io, service)
                                 .await
                             {
-                                eprintln!("Connection error: {}", e);
+                                // Only log if not a normal connection close
+                                if !e.to_string().contains("connection closed") {
+                                    eprintln!("Connection error: {}", e);
+                                }
                             }
+
+                            conn_tracker.decrement();
                         });
                     }
                 } => {}
                 _ = shutdown_rx => {
-                    // Graceful shutdown
+                    // Signal shutdown - new connections will be rejected
+                    tracker.start_shutdown();
                 }
             }
         });
@@ -1330,12 +1454,12 @@ impl GustServer {
         use hyper::server::conn::http2;
         use hyper::service::service_fn;
         use hyper_util::rt::TokioIo;
-        use tokio_rustls::TlsAcceptor;
-        use std::sync::Arc as StdArc;
 
         // Load TLS configuration
         let tls_acceptor = load_tls_config(&tls_config, http2_enabled)
             .map_err(|e| Error::from_reason(format!("TLS config error: {}", e)))?;
+
+        let tracker = self.connection_tracker.clone();
 
         tokio::spawn(async move {
             tokio::select! {
@@ -1346,16 +1470,28 @@ impl GustServer {
                             Err(_) => continue,
                         };
 
+                        // Reject new connections during shutdown
+                        if tracker.is_shutting_down() {
+                            drop(stream);
+                            continue;
+                        }
+
                         let acceptor = tls_acceptor.clone();
                         let state = state.clone();
                         let http2 = http2_enabled;
+                        let conn_tracker = tracker.clone();
+                        conn_tracker.increment();
 
                         tokio::spawn(async move {
                             // TLS handshake
                             let tls_stream = match acceptor.accept(stream).await {
                                 Ok(s) => s,
                                 Err(e) => {
-                                    eprintln!("TLS handshake error: {}", e);
+                                    // Only log if not a normal connection close
+                                    if !e.to_string().contains("connection closed") {
+                                        eprintln!("TLS handshake error: {}", e);
+                                    }
+                                    conn_tracker.decrement();
                                     return;
                                 }
                             };
@@ -1375,21 +1511,28 @@ impl GustServer {
                                     .serve_connection(io, service)
                                     .await
                                 {
-                                    eprintln!("HTTP/2 connection error: {}", e);
+                                    if !e.to_string().contains("connection closed") {
+                                        eprintln!("HTTP/2 connection error: {}", e);
+                                    }
                                 }
                             } else {
                                 if let Err(e) = http1::Builder::new()
                                     .serve_connection(io, service)
                                     .await
                                 {
-                                    eprintln!("HTTP/1.1 connection error: {}", e);
+                                    if !e.to_string().contains("connection closed") {
+                                        eprintln!("HTTP/1.1 connection error: {}", e);
+                                    }
                                 }
                             }
+
+                            conn_tracker.decrement();
                         });
                     }
                 } => {}
                 _ = shutdown_rx => {
-                    // Graceful shutdown
+                    // Signal shutdown - new connections will be rejected
+                    tracker.start_shutdown();
                 }
             }
         });
@@ -1397,12 +1540,64 @@ impl GustServer {
         Ok(())
     }
 
-    /// Shutdown the server
+    /// Shutdown the server immediately (doesn't wait for connections)
     #[napi]
     pub async fn shutdown(&self) {
+        self.connection_tracker.start_shutdown();
         if let Some(tx) = self.shutdown_tx.write().await.take() {
             let _ = tx.send(());
         }
+    }
+
+    /// Graceful shutdown - waits for active connections to drain
+    /// timeout_ms: Maximum time to wait for connections to drain (0 = no timeout)
+    /// Returns true if all connections drained, false if timeout reached
+    #[napi]
+    pub async fn graceful_shutdown(&self, timeout_ms: u32) -> bool {
+        // Signal shutdown to stop accepting new connections
+        self.connection_tracker.start_shutdown();
+
+        // Send shutdown signal to server loop
+        if let Some(tx) = self.shutdown_tx.write().await.take() {
+            let _ = tx.send(());
+        }
+
+        // Wait for connections to drain
+        let start = std::time::Instant::now();
+        let timeout = if timeout_ms > 0 {
+            Some(Duration::from_millis(timeout_ms as u64))
+        } else {
+            None
+        };
+
+        loop {
+            let active = self.connection_tracker.get();
+            if active == 0 {
+                return true; // All connections drained
+            }
+
+            // Check timeout
+            if let Some(t) = timeout {
+                if start.elapsed() >= t {
+                    return false; // Timeout reached
+                }
+            }
+
+            // Wait a bit before checking again
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Get the number of active connections
+    #[napi]
+    pub fn active_connections(&self) -> u32 {
+        self.connection_tracker.get() as u32
+    }
+
+    /// Check if server is shutting down
+    #[napi]
+    pub fn is_shutting_down(&self) -> bool {
+        self.connection_tracker.is_shutting_down()
     }
 }
 
@@ -1411,6 +1606,7 @@ impl Default for GustServer {
         GustServer {
             state: Arc::new(ServerState::new()),
             shutdown_tx: Arc::new(RwLock::new(None)),
+            connection_tracker: Arc::new(ConnectionTracker::new()),
         }
     }
 }
@@ -1470,10 +1666,53 @@ async fn handle_request(
     };
 
     if let Some((handler, params)) = dynamic_result {
-        // Read body for dynamic handlers
-        let body_bytes = match req.collect().await {
-            Ok(collected) => collected.to_bytes(),
-            Err(_) => Bytes::new(),
+        // Check body size limit
+        let max_body_size = *state.max_body_size.read().await as usize;
+        if let Some(content_length) = headers_map.get("content-length") {
+            if let Ok(len) = content_length.parse::<usize>() {
+                if len > max_body_size {
+                    return Ok(hyper::Response::builder()
+                        .status(413)
+                        .header("content-type", "text/plain")
+                        .body(Full::new(Bytes::from("Request Entity Too Large")))
+                        .unwrap());
+                }
+            }
+        }
+
+        // Read body for dynamic handlers with timeout
+        let request_timeout = *state.request_timeout_ms.read().await;
+        let body_result = if request_timeout > 0 {
+            tokio::time::timeout(
+                Duration::from_millis(request_timeout as u64),
+                req.collect()
+            ).await
+        } else {
+            Ok(req.collect().await)
+        };
+
+        let body_bytes = match body_result {
+            Ok(Ok(collected)) => {
+                let bytes = collected.to_bytes();
+                // Double-check size after reading (for chunked encoding)
+                if bytes.len() > max_body_size {
+                    return Ok(hyper::Response::builder()
+                        .status(413)
+                        .header("content-type", "text/plain")
+                        .body(Full::new(Bytes::from("Request Entity Too Large")))
+                        .unwrap());
+                }
+                bytes
+            },
+            Ok(Err(_)) => Bytes::new(),
+            Err(_) => {
+                // Timeout
+                return Ok(hyper::Response::builder()
+                    .status(408)
+                    .header("content-type", "text/plain")
+                    .body(Full::new(Bytes::from("Request Timeout")))
+                    .unwrap());
+            }
         };
         let body_str = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
 
@@ -1501,10 +1740,51 @@ async fn handle_request(
     // 3. Try fallback handler
     let fallback = state.fallback_handler.read().await.clone();
     if let Some(handler) = fallback {
-        // Read body for fallback handler
-        let body_bytes = match req.collect().await {
-            Ok(collected) => collected.to_bytes(),
-            Err(_) => Bytes::new(),
+        // Check body size limit
+        let max_body_size = *state.max_body_size.read().await as usize;
+        if let Some(content_length) = headers_map.get("content-length") {
+            if let Ok(len) = content_length.parse::<usize>() {
+                if len > max_body_size {
+                    return Ok(hyper::Response::builder()
+                        .status(413)
+                        .header("content-type", "text/plain")
+                        .body(Full::new(Bytes::from("Request Entity Too Large")))
+                        .unwrap());
+                }
+            }
+        }
+
+        // Read body for fallback handler with timeout
+        let request_timeout = *state.request_timeout_ms.read().await;
+        let body_result = if request_timeout > 0 {
+            tokio::time::timeout(
+                Duration::from_millis(request_timeout as u64),
+                req.collect()
+            ).await
+        } else {
+            Ok(req.collect().await)
+        };
+
+        let body_bytes = match body_result {
+            Ok(Ok(collected)) => {
+                let bytes = collected.to_bytes();
+                if bytes.len() > max_body_size {
+                    return Ok(hyper::Response::builder()
+                        .status(413)
+                        .header("content-type", "text/plain")
+                        .body(Full::new(Bytes::from("Request Entity Too Large")))
+                        .unwrap());
+                }
+                bytes
+            },
+            Ok(Err(_)) => Bytes::new(),
+            Err(_) => {
+                return Ok(hyper::Response::builder()
+                    .status(408)
+                    .header("content-type", "text/plain")
+                    .body(Full::new(Bytes::from("Request Timeout")))
+                    .unwrap());
+            }
         };
         let body_str = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
 
@@ -1976,6 +2256,373 @@ pub fn create_websocket_upgrade_response(key: String, protocol: Option<String>) 
     WebSocketUpgradeResponse {
         status: 101,
         headers,
+    }
+}
+
+// ============================================================================
+// WebSocket Frame Encoding/Decoding (RFC 6455)
+// ============================================================================
+
+/// WebSocket frame opcode
+#[napi(string_enum)]
+#[derive(PartialEq)]
+pub enum WebSocketOpcode {
+    /// Continuation frame (0x0)
+    Continuation,
+    /// Text frame (0x1)
+    Text,
+    /// Binary frame (0x2)
+    Binary,
+    /// Close frame (0x8)
+    Close,
+    /// Ping frame (0x9)
+    Ping,
+    /// Pong frame (0xA)
+    Pong,
+}
+
+impl WebSocketOpcode {
+    fn from_u8(opcode: u8) -> Option<Self> {
+        match opcode {
+            0x0 => Some(WebSocketOpcode::Continuation),
+            0x1 => Some(WebSocketOpcode::Text),
+            0x2 => Some(WebSocketOpcode::Binary),
+            0x8 => Some(WebSocketOpcode::Close),
+            0x9 => Some(WebSocketOpcode::Ping),
+            0xA => Some(WebSocketOpcode::Pong),
+            _ => None,
+        }
+    }
+
+    fn to_u8(&self) -> u8 {
+        match self {
+            WebSocketOpcode::Continuation => 0x0,
+            WebSocketOpcode::Text => 0x1,
+            WebSocketOpcode::Binary => 0x2,
+            WebSocketOpcode::Close => 0x8,
+            WebSocketOpcode::Ping => 0x9,
+            WebSocketOpcode::Pong => 0xA,
+        }
+    }
+}
+
+/// Parsed WebSocket frame
+#[napi(object)]
+#[derive(Clone)]
+pub struct WebSocketFrame {
+    /// Frame opcode
+    pub opcode: String,
+    /// Is this the final frame in a message?
+    pub fin: bool,
+    /// Payload data (unmasked)
+    pub payload: Vec<u8>,
+    /// Total bytes consumed from input buffer
+    pub bytes_consumed: u32,
+    /// For close frames: the close code (if present)
+    pub close_code: Option<u32>,
+    /// For close frames: the close reason (if present)
+    pub close_reason: Option<String>,
+}
+
+/// Result of parsing WebSocket frame
+#[napi(object)]
+pub struct WebSocketParseResult {
+    /// The parsed frame (if complete)
+    pub frame: Option<WebSocketFrame>,
+    /// Error message (if parse failed)
+    pub error: Option<String>,
+    /// Needs more data?
+    pub incomplete: bool,
+}
+
+/// Parse a WebSocket frame from raw bytes
+///
+/// Handles frame decoding according to RFC 6455:
+/// - Reads FIN, opcode, mask, payload length
+/// - Unmasks payload data (client->server frames are always masked)
+/// - Handles extended payload lengths (16-bit and 64-bit)
+///
+/// Returns WebSocketParseResult with frame data or error
+#[napi]
+pub fn parse_websocket_frame(data: Vec<u8>) -> WebSocketParseResult {
+    if data.len() < 2 {
+        return WebSocketParseResult {
+            frame: None,
+            error: None,
+            incomplete: true,
+        };
+    }
+
+    // First byte: FIN (1 bit), RSV1-3 (3 bits), Opcode (4 bits)
+    let fin = (data[0] & 0x80) != 0;
+    let opcode_raw = data[0] & 0x0F;
+
+    let opcode = match WebSocketOpcode::from_u8(opcode_raw) {
+        Some(op) => op,
+        None => {
+            return WebSocketParseResult {
+                frame: None,
+                error: Some(format!("Invalid opcode: {}", opcode_raw)),
+                incomplete: false,
+            };
+        }
+    };
+
+    // Second byte: MASK (1 bit), Payload length (7 bits)
+    let masked = (data[1] & 0x80) != 0;
+    let payload_len_7bit = (data[1] & 0x7F) as usize;
+
+    // Calculate actual payload length and header size
+    let (payload_len, header_size) = if payload_len_7bit == 126 {
+        // 16-bit extended length
+        if data.len() < 4 {
+            return WebSocketParseResult {
+                frame: None,
+                error: None,
+                incomplete: true,
+            };
+        }
+        let len = u16::from_be_bytes([data[2], data[3]]) as usize;
+        (len, 4)
+    } else if payload_len_7bit == 127 {
+        // 64-bit extended length
+        if data.len() < 10 {
+            return WebSocketParseResult {
+                frame: None,
+                error: None,
+                incomplete: true,
+            };
+        }
+        let len = u64::from_be_bytes([
+            data[2], data[3], data[4], data[5],
+            data[6], data[7], data[8], data[9],
+        ]) as usize;
+        (len, 10)
+    } else {
+        (payload_len_7bit, 2)
+    };
+
+    // Calculate total frame size
+    let mask_size = if masked { 4 } else { 0 };
+    let total_size = header_size + mask_size + payload_len;
+
+    if data.len() < total_size {
+        return WebSocketParseResult {
+            frame: None,
+            error: None,
+            incomplete: true,
+        };
+    }
+
+    // Extract mask key if present
+    let mask_key = if masked {
+        Some([
+            data[header_size],
+            data[header_size + 1],
+            data[header_size + 2],
+            data[header_size + 3],
+        ])
+    } else {
+        None
+    };
+
+    // Extract and unmask payload
+    let payload_start = header_size + mask_size;
+    let mut payload = data[payload_start..payload_start + payload_len].to_vec();
+
+    if let Some(mask) = mask_key {
+        for (i, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[i % 4];
+        }
+    }
+
+    // Parse close code and reason for close frames
+    let (close_code, close_reason) = if opcode == WebSocketOpcode::Close && payload.len() >= 2 {
+        let code = u16::from_be_bytes([payload[0], payload[1]]) as u32;
+        let reason = if payload.len() > 2 {
+            String::from_utf8(payload[2..].to_vec()).ok()
+        } else {
+            None
+        };
+        (Some(code), reason)
+    } else {
+        (None, None)
+    };
+
+    let opcode_str = match opcode {
+        WebSocketOpcode::Continuation => "continuation",
+        WebSocketOpcode::Text => "text",
+        WebSocketOpcode::Binary => "binary",
+        WebSocketOpcode::Close => "close",
+        WebSocketOpcode::Ping => "ping",
+        WebSocketOpcode::Pong => "pong",
+    };
+
+    WebSocketParseResult {
+        frame: Some(WebSocketFrame {
+            opcode: opcode_str.to_string(),
+            fin,
+            payload,
+            bytes_consumed: total_size as u32,
+            close_code,
+            close_reason,
+        }),
+        error: None,
+        incomplete: false,
+    }
+}
+
+/// Encode a WebSocket text frame
+///
+/// Creates an unmasked frame (server->client frames are not masked)
+#[napi]
+pub fn encode_websocket_text(text: String, fin: Option<bool>) -> Vec<u8> {
+    encode_websocket_frame(WebSocketOpcode::Text, text.into_bytes(), fin.unwrap_or(true))
+}
+
+/// Encode a WebSocket binary frame
+#[napi]
+pub fn encode_websocket_binary(data: Vec<u8>, fin: Option<bool>) -> Vec<u8> {
+    encode_websocket_frame(WebSocketOpcode::Binary, data, fin.unwrap_or(true))
+}
+
+/// Encode a WebSocket ping frame
+#[napi]
+pub fn encode_websocket_ping(data: Option<Vec<u8>>) -> Vec<u8> {
+    encode_websocket_frame(WebSocketOpcode::Ping, data.unwrap_or_default(), true)
+}
+
+/// Encode a WebSocket pong frame (in response to ping)
+#[napi]
+pub fn encode_websocket_pong(data: Option<Vec<u8>>) -> Vec<u8> {
+    encode_websocket_frame(WebSocketOpcode::Pong, data.unwrap_or_default(), true)
+}
+
+/// Encode a WebSocket close frame
+///
+/// code: Close status code (1000 = normal closure, 1001 = going away, etc.)
+/// reason: Optional UTF-8 close reason string
+#[napi]
+pub fn encode_websocket_close(code: Option<u32>, reason: Option<String>) -> Vec<u8> {
+    let mut payload = Vec::new();
+
+    if let Some(c) = code {
+        payload.extend_from_slice(&(c as u16).to_be_bytes());
+        if let Some(r) = reason {
+            payload.extend_from_slice(r.as_bytes());
+        }
+    }
+
+    encode_websocket_frame(WebSocketOpcode::Close, payload, true)
+}
+
+/// Encode a WebSocket continuation frame (for fragmented messages)
+#[napi]
+pub fn encode_websocket_continuation(data: Vec<u8>, fin: bool) -> Vec<u8> {
+    encode_websocket_frame(WebSocketOpcode::Continuation, data, fin)
+}
+
+/// Internal function to encode a WebSocket frame
+fn encode_websocket_frame(opcode: WebSocketOpcode, payload: Vec<u8>, fin: bool) -> Vec<u8> {
+    let mut frame = Vec::new();
+
+    // First byte: FIN (1 bit) + RSV1-3 (3 bits, all 0) + Opcode (4 bits)
+    let first_byte = if fin { 0x80 } else { 0x00 } | opcode.to_u8();
+    frame.push(first_byte);
+
+    // Second byte: MASK (0 for server->client) + Payload length
+    let payload_len = payload.len();
+
+    if payload_len <= 125 {
+        frame.push(payload_len as u8);
+    } else if payload_len <= 65535 {
+        frame.push(126);
+        frame.extend_from_slice(&(payload_len as u16).to_be_bytes());
+    } else {
+        frame.push(127);
+        frame.extend_from_slice(&(payload_len as u64).to_be_bytes());
+    }
+
+    // Payload (unmasked for server->client)
+    frame.extend_from_slice(&payload);
+
+    frame
+}
+
+/// Mask WebSocket payload data (for client->server frames)
+///
+/// The same XOR operation is used for both masking and unmasking
+#[napi]
+pub fn mask_websocket_payload(data: Vec<u8>, mask_key: Vec<u8>) -> Vec<u8> {
+    if mask_key.len() != 4 {
+        return data; // Invalid mask key, return unchanged
+    }
+
+    let mut result = data;
+    for (i, byte) in result.iter_mut().enumerate() {
+        *byte ^= mask_key[i % 4];
+    }
+    result
+}
+
+/// Generate a random mask key for client->server frames
+#[napi]
+pub fn generate_websocket_mask() -> Vec<u8> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Simple PRNG using system time (good enough for masking)
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+
+    let mut seed = now as u64;
+    let mut mask = Vec::with_capacity(4);
+
+    for _ in 0..4 {
+        // LCG-based PRNG
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        mask.push((seed >> 33) as u8);
+    }
+
+    mask
+}
+
+/// WebSocket close codes (RFC 6455)
+#[napi(object)]
+pub struct WebSocketCloseCodes;
+
+/// Get standard WebSocket close code values
+#[napi]
+pub fn websocket_close_codes() -> HashMap<String, u32> {
+    let mut codes = HashMap::new();
+    codes.insert("NORMAL".to_string(), 1000);
+    codes.insert("GOING_AWAY".to_string(), 1001);
+    codes.insert("PROTOCOL_ERROR".to_string(), 1002);
+    codes.insert("UNSUPPORTED_DATA".to_string(), 1003);
+    codes.insert("NO_STATUS".to_string(), 1005);
+    codes.insert("ABNORMAL".to_string(), 1006);
+    codes.insert("INVALID_PAYLOAD".to_string(), 1007);
+    codes.insert("POLICY_VIOLATION".to_string(), 1008);
+    codes.insert("MESSAGE_TOO_BIG".to_string(), 1009);
+    codes.insert("EXTENSION_REQUIRED".to_string(), 1010);
+    codes.insert("INTERNAL_ERROR".to_string(), 1011);
+    codes.insert("TLS_HANDSHAKE".to_string(), 1015);
+    codes
+}
+
+/// Validate a WebSocket close code
+#[napi]
+pub fn is_valid_close_code(code: u32) -> bool {
+    match code {
+        // Normal closure codes
+        1000..=1003 | 1007..=1011 => true,
+        // Reserved for private use
+        3000..=3999 => true,
+        // Reserved for applications
+        4000..=4999 => true,
+        // Invalid
+        _ => false,
     }
 }
 
