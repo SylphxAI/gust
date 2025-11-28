@@ -108,6 +108,60 @@ serve({
 })
 ```
 
+### Streaming (SSE)
+
+```typescript
+import { serve, router, get, sseStream } from '@sylphx/gust'
+
+const events = get('/events', () =>
+  sseStream(async function* () {
+    for (let i = 1; i <= 5; i++) {
+      yield { data: { count: i }, id: i }
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+  })
+)
+
+const app = router({ events })
+
+serve({ port: 3000, fetch: app.handler })
+```
+
+### Streaming (NDJSON)
+
+```typescript
+import { serve, router, get, ndjsonStream } from '@sylphx/gust'
+
+const stream = get('/data', () =>
+  ndjsonStream(async function* () {
+    yield { id: 1, name: 'Alice' }
+    yield { id: 2, name: 'Bob' }
+    yield { id: 3, name: 'Charlie' }
+  })
+)
+
+const app = router({ stream })
+
+serve({ port: 3000, fetch: app.handler })
+```
+
+### Streaming (File)
+
+```typescript
+import { createReadStream } from 'node:fs'
+import { serve, router, get, streamFile } from '@sylphx/gust'
+
+const download = get('/download', () =>
+  streamFile(createReadStream('./large-file.zip'), {
+    headers: { 'content-type': 'application/zip' },
+  })
+)
+
+const app = router({ download })
+
+serve({ port: 3000, fetch: app.handler })
+```
+
 ### Static Files
 
 ```typescript
@@ -261,6 +315,33 @@ badRequest()                       // 400
 unauthorized()                     // 401
 forbidden()                        // 403
 serverError()                      // 500
+```
+
+### Streaming Helpers
+
+```typescript
+import { sseStream, streamText, ndjsonStream, streamFile } from '@sylphx/gust'
+
+// Server-Sent Events
+sseStream(async function* () {
+  yield { data: 'hello', id: 1 }
+  yield { data: { json: true }, event: 'update' }
+})
+
+// Plain text streaming
+streamText(async function* () {
+  yield 'Hello '
+  yield 'World!'
+})
+
+// Newline-delimited JSON
+ndjsonStream(async function* () {
+  yield { id: 1, name: 'Alice' }
+  yield { id: 2, name: 'Bob' }
+})
+
+// File streaming
+streamFile(createReadStream('./file.zip'))
 ```
 
 ### Composition
