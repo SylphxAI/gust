@@ -1,12 +1,23 @@
 /**
  * Circuit Breaker
  * Fault tolerance pattern for handling failures gracefully
+ *
+ * Architecture:
+ * - Uses native Rust implementation when available (via gust-napi)
+ * - Falls back to pure TypeScript for edge/serverless environments
  */
 
 import { EventEmitter } from 'node:events'
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
 import { response } from '@sylphx/gust-core'
 import type { Context } from './context'
+import {
+	createNativeBulkhead,
+	createNativeCircuitBreaker,
+	type NativeBulkheadConfig,
+	type NativeCircuitBreaker,
+	type NativeCircuitBreakerConfig,
+} from './native'
 
 // ============================================================================
 // Types
@@ -50,7 +61,17 @@ export type CircuitStats = {
 // Circuit Breaker Implementation
 // ============================================================================
 
+/**
+ * Circuit Breaker
+ *
+ * Uses native Rust implementation when available for maximum performance.
+ * Falls back to pure TypeScript for edge/serverless environments.
+ */
 export class CircuitBreaker extends EventEmitter {
+	// Native implementation (when available)
+	private native: NativeCircuitBreaker | null = null
+
+	// Fallback TypeScript state
 	private state: CircuitState = 'closed'
 	private failures: number[] = [] // Timestamps of failures
 	private successes = 0
@@ -65,6 +86,7 @@ export class CircuitBreaker extends EventEmitter {
 	private readonly successThreshold: number
 	private readonly resetTimeout: number
 	private readonly failureWindow: number
+	private readonly timeout: number
 	private readonly name: string
 
 	constructor(options: CircuitBreakerOptions = {}) {
@@ -73,13 +95,33 @@ export class CircuitBreaker extends EventEmitter {
 		this.successThreshold = options.successThreshold ?? 2
 		this.resetTimeout = options.resetTimeout ?? 30000
 		this.failureWindow = options.failureWindow ?? 60000
+		this.timeout = options.timeout ?? 10000
 		this.name = options.name ?? 'default'
+
+		// Try to use native implementation
+		const nativeConfig: NativeCircuitBreakerConfig = {
+			failureThreshold: this.failureThreshold,
+			successThreshold: this.successThreshold,
+			resetTimeoutMs: this.resetTimeout,
+			failureWindowMs: this.failureWindow,
+			timeoutMs: this.timeout,
+			name: this.name,
+		}
+		this.native = createNativeCircuitBreaker(nativeConfig)
+	}
+
+	/** Check if using native implementation */
+	get isNative(): boolean {
+		return this.native !== null
 	}
 
 	/**
 	 * Get current state
 	 */
 	getState(): CircuitState {
+		if (this.native) {
+			return this.native.state() as CircuitState
+		}
 		return this.state
 	}
 
@@ -87,6 +129,19 @@ export class CircuitBreaker extends EventEmitter {
 	 * Get statistics
 	 */
 	getStats(): CircuitStats {
+		if (this.native) {
+			const stats = this.native.stats()
+			return {
+				state: stats.state as CircuitState,
+				failures: stats.failures,
+				successes: stats.successes,
+				lastFailure: this.lastFailure,
+				lastSuccess: this.lastSuccess,
+				totalRequests: stats.totalRequests,
+				totalFailures: stats.totalFailures,
+				totalSuccesses: stats.totalSuccesses,
+			}
+		}
 		return {
 			state: this.state,
 			failures: this.failures.length,
@@ -103,6 +158,10 @@ export class CircuitBreaker extends EventEmitter {
 	 * Check if request can proceed
 	 */
 	canRequest(): boolean {
+		if (this.native) {
+			return this.native.canRequest()
+		}
+
 		if (this.state === 'closed') return true
 		if (this.state === 'open') {
 			// Check if we can try again
@@ -120,6 +179,12 @@ export class CircuitBreaker extends EventEmitter {
 	 * Record success
 	 */
 	recordSuccess(): void {
+		if (this.native) {
+			this.native.recordSuccess()
+			this.lastSuccess = Date.now()
+			return
+		}
+
 		this.totalRequests++
 		this.totalSuccesses++
 		this.lastSuccess = Date.now()
@@ -136,6 +201,12 @@ export class CircuitBreaker extends EventEmitter {
 	 * Record failure
 	 */
 	recordFailure(): void {
+		if (this.native) {
+			this.native.recordFailure()
+			this.lastFailure = Date.now()
+			return
+		}
+
 		this.totalRequests++
 		this.totalFailures++
 		this.lastFailure = Date.now()
@@ -177,6 +248,12 @@ export class CircuitBreaker extends EventEmitter {
 	 * Reset the circuit
 	 */
 	reset(): void {
+		if (this.native) {
+			this.native.reset()
+			this.emit('reset', this.name)
+			return
+		}
+
 		this.state = 'closed'
 		this.failures = []
 		this.successes = 0
@@ -358,10 +435,22 @@ export type BulkheadOptions = {
 
 /**
  * Bulkhead middleware (limit concurrency)
+ *
+ * Uses native Rust implementation when available for maximum performance.
+ * Falls back to pure TypeScript for edge/serverless environments.
  */
 export const bulkhead = (options: BulkheadOptions = {}): Wrapper<Context> => {
 	const { maxConcurrent = 10, maxQueue = 100, queueTimeout = 30000, onReject } = options
 
+	// Try to use native bulkhead
+	const nativeConfig: NativeBulkheadConfig = {
+		maxConcurrent,
+		maxQueue,
+		queueTimeoutMs: queueTimeout,
+	}
+	const nativeBulkhead = createNativeBulkhead(nativeConfig)
+
+	// Fallback TypeScript state
 	let running = 0
 	const queue: Array<{
 		resolve: () => void
@@ -387,6 +476,15 @@ export const bulkhead = (options: BulkheadOptions = {}): Wrapper<Context> => {
 			))
 
 	const acquire = (): Promise<void> => {
+		// Use native if available
+		if (nativeBulkhead) {
+			if (nativeBulkhead.tryAcquire()) {
+				return Promise.resolve()
+			}
+			return Promise.reject(new Error('Queue full'))
+		}
+
+		// Fallback TypeScript implementation
 		if (running < maxConcurrent) {
 			running++
 			return Promise.resolve()
@@ -408,6 +506,9 @@ export const bulkhead = (options: BulkheadOptions = {}): Wrapper<Context> => {
 	}
 
 	const release = (): void => {
+		// Native bulkhead handles release internally via RAII
+		if (nativeBulkhead) return
+
 		running--
 		const next = queue.shift()
 		if (next) {

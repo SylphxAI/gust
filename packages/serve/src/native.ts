@@ -984,8 +984,12 @@ export const createNativeCircuitBreaker = (
 	config: NativeCircuitBreakerConfig
 ): NativeCircuitBreaker | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return new binding.CircuitBreaker(config)
+	if (!binding?.CircuitBreaker) return null
+	try {
+		return new binding.CircuitBreaker(config)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -993,8 +997,12 @@ export const createNativeCircuitBreaker = (
  */
 export const createNativeBulkhead = (config: NativeBulkheadConfig): NativeBulkhead | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return new binding.Bulkhead(config)
+	if (!binding?.Bulkhead) return null
+	try {
+		return new binding.Bulkhead(config)
+	} catch {
+		return null
+	}
 }
 
 // ============================================================================
@@ -1112,8 +1120,12 @@ export const nativeExtractProxyInfo = (
  */
 export const nativeGenerateTraceId = (): string | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return binding.generateTraceId()
+	if (!binding?.generateTraceId) return null
+	try {
+		return binding.generateTraceId()
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1121,8 +1133,12 @@ export const nativeGenerateTraceId = (): string | null => {
  */
 export const nativeGenerateSpanId = (): string | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return binding.generateSpanId()
+	if (!binding?.generateSpanId) return null
+	try {
+		return binding.generateSpanId()
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1130,8 +1146,12 @@ export const nativeGenerateSpanId = (): string | null => {
  */
 export const nativeParseTraceparent = (header: string): NativeSpanContext | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return binding.parseTraceparent(header)
+	if (!binding?.parseTraceparent) return null
+	try {
+		return binding.parseTraceparent(header)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1143,8 +1163,12 @@ export const nativeFormatTraceparent = (
 	traceFlags: number
 ): string | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return binding.formatTraceparent(traceId, spanId, traceFlags)
+	if (!binding?.formatTraceparent) return null
+	try {
+		return binding.formatTraceparent(traceId, spanId, traceFlags)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1164,8 +1188,12 @@ export const createNativeTracer = (
 	sampleRate?: number
 ): NativeTracer | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return new binding.Tracer(serviceName, sampleRate)
+	if (!binding?.Tracer) return null
+	try {
+		return new binding.Tracer(serviceName, sampleRate)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1181,8 +1209,12 @@ export const createNativeTracer = (
  */
 export const createNativeMetricsCollector = (): NativeMetricsCollector | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return new binding.MetricsCollector()
+	if (!binding?.MetricsCollector) return null
+	try {
+		return new binding.MetricsCollector()
+	} catch {
+		return null
+	}
 }
 
 // ============================================================================

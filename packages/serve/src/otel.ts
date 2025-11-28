@@ -1,10 +1,22 @@
 /**
  * OpenTelemetry Integration
  * Distributed tracing and metrics for observability
+ *
+ * Architecture:
+ * - Uses native Rust implementation when available (via gust-napi)
+ * - Falls back to pure TypeScript for edge/serverless environments
  */
 
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
 import type { Context } from './context'
+import {
+	createNativeMetricsCollector,
+	type NativeMetricsCollector,
+	nativeFormatTraceparent,
+	nativeGenerateSpanId,
+	nativeGenerateTraceId,
+	nativeParseTraceparent,
+} from './native'
 import { getClientIp } from './proxy'
 import { getRequestId } from './tracing'
 
@@ -75,8 +87,14 @@ export type SpanExporter = {
 
 /**
  * Generate 16-byte trace ID (32 hex chars)
+ * Uses native Rust implementation when available.
  */
 export const generateTraceId = (): string => {
+	// Try native first
+	const native = nativeGenerateTraceId()
+	if (native) return native
+
+	// Fallback to JS
 	const bytes = new Uint8Array(16)
 	crypto.getRandomValues(bytes)
 	return Array.from(bytes)
@@ -86,8 +104,14 @@ export const generateTraceId = (): string => {
 
 /**
  * Generate 8-byte span ID (16 hex chars)
+ * Uses native Rust implementation when available.
  */
 export const generateSpanId = (): string => {
+	// Try native first
+	const native = nativeGenerateSpanId()
+	if (native) return native
+
+	// Fallback to JS
 	const bytes = new Uint8Array(8)
 	crypto.getRandomValues(bytes)
 	return Array.from(bytes)
@@ -103,8 +127,15 @@ export const generateSpanId = (): string => {
  * Parse W3C traceparent header
  * Format: version-traceId-spanId-traceFlags
  * Example: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+ *
+ * Uses native Rust implementation when available.
  */
 export const parseTraceparent = (header: string): SpanContext | null => {
+	// Try native first
+	const native = nativeParseTraceparent(header)
+	if (native) return native
+
+	// Fallback to JS
 	const parts = header.split('-')
 	if (parts.length !== 4) return null
 
@@ -132,8 +163,14 @@ export const parseTraceparent = (header: string): SpanContext | null => {
 
 /**
  * Format W3C traceparent header
+ * Uses native Rust implementation when available.
  */
 export const formatTraceparent = (ctx: SpanContext): string => {
+	// Try native first
+	const native = nativeFormatTraceparent(ctx.traceId, ctx.spanId, ctx.traceFlags)
+	if (native) return native
+
+	// Fallback to JS
 	return `00-${ctx.traceId}-${ctx.spanId}-${ctx.traceFlags.toString(16).padStart(2, '0')}`
 }
 
@@ -511,8 +548,15 @@ const attributeKey = (attrs: SpanAttributes): string => {
 
 /**
  * Simple metrics collector
+ *
+ * Uses native Rust implementation when available for maximum performance.
+ * Falls back to pure TypeScript for edge/serverless environments.
  */
 export class MetricsCollector {
+	// Native implementation (when available)
+	private native: NativeMetricsCollector | null = null
+
+	// Fallback TypeScript state
 	private counters = new Map<string, { value: number; attributes: SpanAttributes }[]>()
 	private histograms = new Map<
 		string,
@@ -520,7 +564,26 @@ export class MetricsCollector {
 	>()
 	private gauges = new Map<string, { value: number; attributes: SpanAttributes }>()
 
+	constructor() {
+		// Try to use native implementation
+		this.native = createNativeMetricsCollector()
+	}
+
+	/** Check if using native implementation */
+	get isNative(): boolean {
+		return this.native !== null
+	}
+
 	createCounter(name: string): Counter {
+		if (this.native) {
+			const nativeCollector = this.native
+			return {
+				add: (value: number, _attributes: SpanAttributes = {}) => {
+					nativeCollector.counterAdd(name, value)
+				},
+			}
+		}
+
 		if (!this.counters.has(name)) {
 			this.counters.set(name, [])
 		}
@@ -532,6 +595,15 @@ export class MetricsCollector {
 	}
 
 	createHistogram(name: string): Histogram {
+		if (this.native) {
+			const nativeCollector = this.native
+			return {
+				record: (value: number, _attributes: SpanAttributes = {}) => {
+					nativeCollector.histogramRecord(name, value)
+				},
+			}
+		}
+
 		if (!this.histograms.has(name)) {
 			this.histograms.set(name, new Map())
 		}
@@ -551,6 +623,15 @@ export class MetricsCollector {
 	}
 
 	createGauge(name: string): Gauge {
+		if (this.native) {
+			const nativeCollector = this.native
+			return {
+				set: (value: number, _attributes: SpanAttributes = {}) => {
+					nativeCollector.gaugeSet(name, value)
+				},
+			}
+		}
+
 		return {
 			set: (value: number, attributes: SpanAttributes = {}) => {
 				this.gauges.set(`${name}:${attributeKey(attributes)}`, { value, attributes })
@@ -562,6 +643,10 @@ export class MetricsCollector {
 	 * Export metrics in Prometheus format
 	 */
 	toPrometheus(): string {
+		if (this.native) {
+			return this.native.toPrometheus()
+		}
+
 		const lines: string[] = []
 
 		// Counters
