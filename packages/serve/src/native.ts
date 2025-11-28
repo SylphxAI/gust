@@ -1249,8 +1249,12 @@ export const nativeIsWebSocketUpgrade = (headers: Record<string, string>): boole
  */
 export const nativeGenerateWebSocketAccept = (key: string): string | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	return binding.generateWebsocketAccept(key)
+	if (!binding?.generateWebsocketAccept) return null
+	try {
+		return binding.generateWebsocketAccept(key)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1317,9 +1321,13 @@ export const nativeParseWebSocketFrame = (data: number[] | Buffer): WebSocketPar
  */
 export const nativeEncodeWebSocketText = (text: string, fin = true): Buffer | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	const arr = binding.encodeWebsocketText(text, fin)
-	return Buffer.from(arr)
+	if (!binding?.encodeWebsocketText) return null
+	try {
+		const arr = binding.encodeWebsocketText(text, fin)
+		return Buffer.from(arr)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1327,10 +1335,14 @@ export const nativeEncodeWebSocketText = (text: string, fin = true): Buffer | nu
  */
 export const nativeEncodeWebSocketBinary = (data: number[] | Buffer, fin = true): Buffer | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	const arr = Array.isArray(data) ? data : Array.from(data)
-	const result = binding.encodeWebsocketBinary(arr, fin)
-	return Buffer.from(result)
+	if (!binding?.encodeWebsocketBinary) return null
+	try {
+		const arr = Array.isArray(data) ? data : Array.from(data)
+		const result = binding.encodeWebsocketBinary(arr, fin)
+		return Buffer.from(result)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1344,10 +1356,14 @@ export const nativeEncodeWebSocketBinary = (data: number[] | Buffer, fin = true)
  */
 export const nativeEncodeWebSocketPing = (data?: number[] | Buffer): Buffer | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
-	const result = binding.encodeWebsocketPing(arr)
-	return Buffer.from(result)
+	if (!binding?.encodeWebsocketPing) return null
+	try {
+		const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
+		const result = binding.encodeWebsocketPing(arr)
+		return Buffer.from(result)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1362,10 +1378,14 @@ export const nativeEncodeWebSocketPing = (data?: number[] | Buffer): Buffer | nu
  */
 export const nativeEncodeWebSocketPong = (data?: number[] | Buffer): Buffer | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
-	const result = binding.encodeWebsocketPong(arr)
-	return Buffer.from(result)
+	if (!binding?.encodeWebsocketPong) return null
+	try {
+		const arr = data ? (Array.isArray(data) ? data : Array.from(data)) : undefined
+		const result = binding.encodeWebsocketPong(arr)
+		return Buffer.from(result)
+	} catch {
+		return null
+	}
 }
 
 /**
@@ -1382,9 +1402,13 @@ export const nativeEncodeWebSocketPong = (data?: number[] | Buffer): Buffer | nu
  */
 export const nativeEncodeWebSocketClose = (code?: number, reason?: string): Buffer | null => {
 	const binding = loadNative()
-	if (!binding) return null
-	const result = binding.encodeWebsocketClose(code, reason)
-	return Buffer.from(result)
+	if (!binding?.encodeWebsocketClose) return null
+	try {
+		const result = binding.encodeWebsocketClose(code, reason)
+		return Buffer.from(result)
+	} catch {
+		return null
+	}
 }
 
 /**

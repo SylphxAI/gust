@@ -1,12 +1,24 @@
 /**
  * WebSocket support
  * RFC 6455 compliant WebSocket implementation
+ *
+ * Architecture:
+ * - Uses native Rust implementation when available (via gust-napi)
+ * - Falls back to pure TypeScript for edge/serverless environments
  */
 
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import type { Socket } from 'node:net'
 import type { TLSSocket } from 'node:tls'
+import {
+	nativeEncodeWebSocketBinary,
+	nativeEncodeWebSocketClose,
+	nativeEncodeWebSocketPing,
+	nativeEncodeWebSocketPong,
+	nativeEncodeWebSocketText,
+	nativeGenerateWebSocketAccept,
+} from './native'
 
 // WebSocket magic GUID for handshake
 const WS_MAGIC_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
@@ -182,6 +194,38 @@ export class WebSocket extends EventEmitter {
 	private sendFrame(opcode: number, payload: Buffer): void {
 		if (this.closed) return
 
+		// Try native encoding first
+		let nativeFrame: Buffer | null = null
+		switch (opcode) {
+			case OPCODE.TEXT:
+				nativeFrame = nativeEncodeWebSocketText(payload.toString('utf8'), true)
+				break
+			case OPCODE.BINARY:
+				nativeFrame = nativeEncodeWebSocketBinary(payload, true)
+				break
+			case OPCODE.PING:
+				nativeFrame = nativeEncodeWebSocketPing(payload)
+				break
+			case OPCODE.PONG:
+				nativeFrame = nativeEncodeWebSocketPong(payload)
+				break
+			case OPCODE.CLOSE:
+				if (payload.length >= 2) {
+					const code = payload.readUInt16BE(0)
+					const reason = payload.length > 2 ? payload.subarray(2).toString('utf8') : undefined
+					nativeFrame = nativeEncodeWebSocketClose(code, reason)
+				} else {
+					nativeFrame = nativeEncodeWebSocketClose()
+				}
+				break
+		}
+
+		if (nativeFrame) {
+			this.socket.write(nativeFrame)
+			return
+		}
+
+		// Fallback to JS encoding
 		const payloadLen = payload.length
 		let header: Buffer
 
@@ -249,8 +293,14 @@ export class WebSocket extends EventEmitter {
 
 /**
  * Generate WebSocket accept key
+ * Uses native Rust implementation when available.
  */
 export const generateAcceptKey = (key: string): string => {
+	// Try native first
+	const native = nativeGenerateWebSocketAccept(key)
+	if (native) return native
+
+	// Fallback to Node.js crypto
 	return createHash('sha1')
 		.update(key + WS_MAGIC_GUID)
 		.digest('base64')
