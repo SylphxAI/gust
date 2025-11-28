@@ -71,6 +71,18 @@ export interface NativeCompressionConfig {
 	level?: number
 }
 
+/** TLS/HTTPS configuration for native server */
+export interface NativeTlsConfig {
+	/** Path to certificate file (PEM format) */
+	certPath?: string
+	/** Path to private key file (PEM format) */
+	keyPath?: string
+	/** Certificate as PEM string */
+	cert?: string
+	/** Private key as PEM string */
+	key?: string
+}
+
 /** Full server configuration for native server */
 export interface NativeServerConfig {
 	/** Port to listen on */
@@ -87,6 +99,10 @@ export interface NativeServerConfig {
 	security?: NativeSecurityConfig
 	/** Compression configuration */
 	compression?: NativeCompressionConfig
+	/** TLS/HTTPS configuration */
+	tls?: NativeTlsConfig
+	/** Enable HTTP/2 (requires TLS) */
+	http2?: boolean
 }
 
 // ============================================================================
@@ -247,7 +263,12 @@ export interface NativeBinding {
 	GustServer: new () => NativeServer
 	GustServerWithConfig: (config: NativeServerConfig) => Promise<NativeServer>
 	isIoUringAvailable: () => boolean
+	isTlsAvailable: () => boolean
+	isHttp2Available: () => boolean
+	isCompressionAvailable: () => boolean
 	getCpuCount: () => number
+	getPhysicalCpuCount: () => number
+	getRecommendedWorkers: () => number
 	corsPermissive: () => NativeCorsConfig
 	securityStrict: () => NativeSecurityConfig
 	// Circuit Breaker
@@ -289,6 +310,13 @@ export interface NativeBinding {
 	formatTraceparent: (traceId: string, spanId: string, traceFlags: number) => string
 	Tracer: new (serviceName: string, sampleRate?: number) => NativeTracer
 	MetricsCollector: new () => NativeMetricsCollector
+	// WebSocket
+	isWebsocketUpgrade: (headers: Record<string, string>) => boolean
+	generateWebsocketAccept: (key: string) => string
+	createWebsocketUpgradeResponse: (
+		key: string,
+		protocol?: string
+	) => { status: number; headers: Record<string, string> }
 }
 
 /** Request context passed to JS handlers */
@@ -330,7 +358,17 @@ export interface NativeServer {
 	enableRateLimit(config: NativeRateLimitConfig): Promise<void>
 	/** Enable security headers middleware */
 	enableSecurity(config: NativeSecurityConfig): Promise<void>
+	/** Enable compression middleware */
+	enableCompression(config: NativeCompressionConfig): Promise<void>
+	/** Enable TLS/HTTPS */
+	enableTls(config: NativeTlsConfig): Promise<void>
+	/** Enable HTTP/2 */
+	enableHttp2(): Promise<void>
+	/** Start server on port */
 	serve(port: number): Promise<void>
+	/** Start server with custom hostname */
+	serveWithHostname(port: number, hostname: string): Promise<void>
+	/** Shutdown the server */
 	shutdown(): Promise<void>
 }
 
@@ -608,6 +646,74 @@ export const getCpuCount = (): number => {
 		return binding.getCpuCount()
 	} catch {
 		return 1
+	}
+}
+
+/**
+ * Get number of physical CPU cores (excluding hyperthreading)
+ */
+export const getPhysicalCpuCount = (): number => {
+	const binding = loadNative()
+	if (!binding) return 1
+	try {
+		return binding.getPhysicalCpuCount()
+	} catch {
+		return 1
+	}
+}
+
+/**
+ * Get recommended worker count for optimal server performance
+ *
+ * Returns min(cpu_count, 8) which is suitable for most web server workloads.
+ * For CPU-bound workloads, consider using getPhysicalCpuCount() instead.
+ */
+export const getRecommendedWorkers = (): number => {
+	const binding = loadNative()
+	if (!binding) return 1
+	try {
+		return binding.getRecommendedWorkers()
+	} catch {
+		return 1
+	}
+}
+
+/**
+ * Check if TLS support is available in native server
+ */
+export const isTlsAvailable = (): boolean => {
+	const binding = loadNative()
+	if (!binding) return false
+	try {
+		return binding.isTlsAvailable()
+	} catch {
+		return false
+	}
+}
+
+/**
+ * Check if HTTP/2 support is available in native server
+ */
+export const isHttp2Available = (): boolean => {
+	const binding = loadNative()
+	if (!binding) return false
+	try {
+		return binding.isHttp2Available()
+	} catch {
+		return false
+	}
+}
+
+/**
+ * Check if compression support is available in native server
+ */
+export const isCompressionAvailable = (): boolean => {
+	const binding = loadNative()
+	if (!binding) return false
+	try {
+		return binding.isCompressionAvailable()
+	} catch {
+		return false
 	}
 }
 
@@ -993,4 +1099,61 @@ export const createNativeMetricsCollector = (): NativeMetricsCollector | null =>
 	const binding = loadNative()
 	if (!binding) return null
 	return new binding.MetricsCollector()
+}
+
+// ============================================================================
+// Native WebSocket Support
+// ============================================================================
+
+/**
+ * Check if request headers indicate a WebSocket upgrade request
+ *
+ * @example
+ * ```ts
+ * if (nativeIsWebSocketUpgrade(ctx.headers)) {
+ *   const acceptKey = nativeGenerateWebSocketAccept(ctx.headers['sec-websocket-key'])
+ *   // Handle WebSocket upgrade...
+ * }
+ * ```
+ */
+export const nativeIsWebSocketUpgrade = (headers: Record<string, string>): boolean => {
+	const binding = loadNative()
+	if (!binding) return false
+	try {
+		return binding.isWebsocketUpgrade(headers)
+	} catch {
+		return false
+	}
+}
+
+/**
+ * Generate WebSocket accept key from client's Sec-WebSocket-Key header
+ *
+ * Implements RFC 6455 key generation algorithm
+ */
+export const nativeGenerateWebSocketAccept = (key: string): string | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.generateWebsocketAccept(key)
+}
+
+/**
+ * Create WebSocket upgrade response headers
+ *
+ * @example
+ * ```ts
+ * const { status, headers } = nativeCreateWebSocketUpgradeResponse(
+ *   ctx.headers['sec-websocket-key'],
+ *   ctx.headers['sec-websocket-protocol']
+ * )
+ * return { status, headers, body: null }
+ * ```
+ */
+export const nativeCreateWebSocketUpgradeResponse = (
+	key: string,
+	protocol?: string
+): { status: number; headers: Record<string, string> } | null => {
+	const binding = loadNative()
+	if (!binding) return null
+	return binding.createWebsocketUpgradeResponse(key, protocol)
 }

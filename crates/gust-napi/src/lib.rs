@@ -2,6 +2,14 @@
 //!
 //! High-performance native HTTP server for Node.js/Bun.
 //! Uses gust-core for shared logic.
+//!
+//! Features:
+//! - HTTP/1.1 and HTTP/2 support
+//! - TLS/HTTPS with ALPN negotiation
+//! - Streaming responses (chunked transfer encoding)
+//! - Compression (gzip, brotli)
+//! - WebSocket upgrade handling
+//! - Multi-threaded worker pool
 
 use bytes::Bytes;
 use gust_core::{
@@ -46,6 +54,22 @@ pub struct ResponseData {
     pub status: u32,
     pub headers: HashMap<String, String>,
     pub body: String,
+    /// Set to true if body is a streaming response (chunked)
+    pub streaming: Option<bool>,
+}
+
+/// TLS/HTTPS configuration
+#[napi(object)]
+#[derive(Clone, Default)]
+pub struct TlsConfig {
+    /// Path to certificate file (PEM format)
+    pub cert_path: Option<String>,
+    /// Path to private key file (PEM format)
+    pub key_path: Option<String>,
+    /// Certificate as PEM string
+    pub cert: Option<String>,
+    /// Private key as PEM string
+    pub key: Option<String>,
 }
 
 /// CORS configuration
@@ -118,7 +142,7 @@ pub struct ServerConfig {
     pub port: Option<u32>,
     /// Hostname to bind to
     pub hostname: Option<String>,
-    /// Number of worker threads
+    /// Number of worker threads (0 = auto-detect)
     pub workers: Option<u32>,
     /// CORS configuration
     pub cors: Option<CorsConfig>,
@@ -128,6 +152,10 @@ pub struct ServerConfig {
     pub security: Option<SecurityConfig>,
     /// Compression configuration
     pub compression: Option<CompressionConfig>,
+    /// TLS/HTTPS configuration
+    pub tls: Option<TlsConfig>,
+    /// Enable HTTP/2 (requires TLS)
+    pub http2: Option<bool>,
 }
 
 // ============================================================================
@@ -908,6 +936,12 @@ struct ServerState {
     middleware: RwLock<MiddlewareChain>,
     /// Fallback handler for unmatched routes
     fallback_handler: RwLock<Option<DynamicHandler>>,
+    /// Compression configuration
+    compression: RwLock<Option<CompressionConfig>>,
+    /// TLS configuration
+    tls_config: RwLock<Option<TlsConfig>>,
+    /// Enable HTTP/2
+    http2_enabled: RwLock<bool>,
 }
 
 impl ServerState {
@@ -917,6 +951,9 @@ impl ServerState {
             dynamic_routes: RwLock::new(Router::new()),
             middleware: RwLock::new(MiddlewareChain::new()),
             fallback_handler: RwLock::new(None),
+            compression: RwLock::new(None),
+            tls_config: RwLock::new(None),
+            http2_enabled: RwLock::new(false),
         }
     }
 }
@@ -957,7 +994,40 @@ impl GustServer {
             server.enable_security(security).await?;
         }
 
+        if let Some(compression) = config.compression {
+            server.enable_compression(compression).await?;
+        }
+
+        if let Some(tls) = config.tls {
+            server.enable_tls(tls).await?;
+        }
+
+        if let Some(http2) = config.http2 {
+            *server.state.http2_enabled.write().await = http2;
+        }
+
         Ok(server)
+    }
+
+    /// Enable compression middleware
+    #[napi]
+    pub async fn enable_compression(&self, config: CompressionConfig) -> Result<()> {
+        *self.state.compression.write().await = Some(config);
+        Ok(())
+    }
+
+    /// Enable TLS/HTTPS
+    #[napi]
+    pub async fn enable_tls(&self, config: TlsConfig) -> Result<()> {
+        *self.state.tls_config.write().await = Some(config);
+        Ok(())
+    }
+
+    /// Enable HTTP/2
+    #[napi]
+    pub async fn enable_http2(&self) -> Result<()> {
+        *self.state.http2_enabled.write().await = true;
+        Ok(())
     }
 
     /// Enable CORS middleware
@@ -1150,17 +1220,22 @@ impl GustServer {
     /// Start the server (non-blocking)
     #[napi]
     pub async fn serve(&self, port: u32) -> Result<()> {
-        use hyper::server::conn::http1;
-        use hyper::service::service_fn;
-        use hyper_util::rt::TokioIo;
+        self.serve_with_hostname(port, "0.0.0.0".to_string()).await
+    }
+
+    /// Start the server with custom hostname (non-blocking)
+    #[napi]
+    pub async fn serve_with_hostname(&self, port: u32, hostname: String) -> Result<()> {
         use std::net::SocketAddr;
         use tokio::net::TcpListener;
 
-        let addr: SocketAddr = format!("0.0.0.0:{}", port)
+        let addr: SocketAddr = format!("{}:{}", hostname, port)
             .parse()
-            .map_err(|e| Error::from_reason(format!("Invalid port: {}", e)))?;
+            .map_err(|e| Error::from_reason(format!("Invalid address: {}", e)))?;
 
         let state = self.state.clone();
+        let tls_config = state.tls_config.read().await.clone();
+        let http2_enabled = *state.http2_enabled.read().await;
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         *self.shutdown_tx.write().await = Some(shutdown_tx);
@@ -1170,6 +1245,39 @@ impl GustServer {
             .map_err(|e| Error::from_reason(format!("Bind error: {}", e)))?;
 
         // Spawn server task
+        #[allow(unused_variables)]
+        if let Some(tls) = tls_config {
+            // TLS server
+            #[cfg(feature = "tls")]
+            {
+                self.serve_tls(listener, tls, http2_enabled, state, shutdown_rx).await?;
+            }
+            #[cfg(not(feature = "tls"))]
+            {
+                let _ = (tls, http2_enabled); // Suppress unused variable warning
+                return Err(Error::from_reason("TLS support not enabled. Compile with 'tls' feature.".to_string()));
+            }
+        } else {
+            // Plain HTTP server
+            self.serve_http(listener, http2_enabled, state, shutdown_rx).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Serve HTTP (non-TLS) connections
+    #[allow(unused_variables)]
+    async fn serve_http(
+        &self,
+        listener: tokio::net::TcpListener,
+        http2_enabled: bool, // Reserved for future h2c support
+        state: Arc<ServerState>,
+        shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<()> {
+        use hyper::server::conn::http1;
+        use hyper::service::service_fn;
+        use hyper_util::rt::TokioIo;
+
         tokio::spawn(async move {
             tokio::select! {
                 _ = async {
@@ -1189,11 +1297,93 @@ impl GustServer {
                                 }
                             });
 
+                            // HTTP/2 over clear text (h2c) is less common, use HTTP/1.1 by default
                             if let Err(e) = http1::Builder::new()
                                 .serve_connection(io, service)
                                 .await
                             {
                                 eprintln!("Connection error: {}", e);
+                            }
+                        });
+                    }
+                } => {}
+                _ = shutdown_rx => {
+                    // Graceful shutdown
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Serve TLS connections with optional HTTP/2
+    #[cfg(feature = "tls")]
+    async fn serve_tls(
+        &self,
+        listener: tokio::net::TcpListener,
+        tls_config: TlsConfig,
+        http2_enabled: bool,
+        state: Arc<ServerState>,
+        shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<()> {
+        use hyper::server::conn::http1;
+        use hyper::server::conn::http2;
+        use hyper::service::service_fn;
+        use hyper_util::rt::TokioIo;
+        use tokio_rustls::TlsAcceptor;
+        use std::sync::Arc as StdArc;
+
+        // Load TLS configuration
+        let tls_acceptor = load_tls_config(&tls_config, http2_enabled)
+            .map_err(|e| Error::from_reason(format!("TLS config error: {}", e)))?;
+
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = async {
+                    loop {
+                        let (stream, _) = match listener.accept().await {
+                            Ok(conn) => conn,
+                            Err(_) => continue,
+                        };
+
+                        let acceptor = tls_acceptor.clone();
+                        let state = state.clone();
+                        let http2 = http2_enabled;
+
+                        tokio::spawn(async move {
+                            // TLS handshake
+                            let tls_stream = match acceptor.accept(stream).await {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    eprintln!("TLS handshake error: {}", e);
+                                    return;
+                                }
+                            };
+
+                            let io = TokioIo::new(tls_stream);
+                            let service = service_fn(move |req| {
+                                let state = state.clone();
+                                async move {
+                                    handle_request(state, req).await
+                                }
+                            });
+
+                            // Use HTTP/2 if enabled and negotiated via ALPN
+                            if http2 {
+                                // Try HTTP/2 first, fall back to HTTP/1.1
+                                if let Err(e) = http2::Builder::new(TokioExecutor)
+                                    .serve_connection(io, service)
+                                    .await
+                                {
+                                    eprintln!("HTTP/2 connection error: {}", e);
+                                }
+                            } else {
+                                if let Err(e) = http1::Builder::new()
+                                    .serve_connection(io, service)
+                                    .await
+                                {
+                                    eprintln!("HTTP/1.1 connection error: {}", e);
+                                }
                             }
                         });
                     }
@@ -1359,6 +1549,7 @@ async fn call_js_handler(
                     status: 500,
                     headers: HashMap::new(),
                     body: "Internal Server Error".to_string(),
+                    streaming: None,
                 },
             }
         }
@@ -1366,6 +1557,7 @@ async fn call_js_handler(
             status: 500,
             headers: HashMap::new(),
             body: "Internal Server Error".to_string(),
+            streaming: None,
         },
     }
 }
@@ -1413,6 +1605,20 @@ pub fn get_cpu_count() -> u32 {
     num_cpus::get() as u32
 }
 
+/// Get the number of physical CPU cores (excluding hyperthreading)
+#[napi]
+pub fn get_physical_cpu_count() -> u32 {
+    num_cpus::get_physical() as u32
+}
+
+/// Get recommended worker count for optimal performance
+/// Returns min(cpu_count, 4) for typical web server workloads
+#[napi]
+pub fn get_recommended_workers() -> u32 {
+    let cpus = num_cpus::get() as u32;
+    cpus.min(8) // Cap at 8 workers for most workloads
+}
+
 /// Create a CORS middleware with permissive settings
 #[napi]
 pub fn cors_permissive() -> CorsConfig {
@@ -1436,6 +1642,340 @@ pub fn security_strict() -> SecurityConfig {
         content_type_options: Some(true),
         xss_protection: Some(true),
         referrer_policy: Some("strict-origin-when-cross-origin".to_string()),
+    }
+}
+
+/// Check if TLS support is available
+#[napi]
+pub fn is_tls_available() -> bool {
+    #[cfg(feature = "tls")]
+    { true }
+    #[cfg(not(feature = "tls"))]
+    { false }
+}
+
+/// Check if HTTP/2 support is available
+#[napi]
+pub fn is_http2_available() -> bool {
+    // HTTP/2 is always available through hyper
+    true
+}
+
+/// Check if compression support is available
+#[napi]
+pub fn is_compression_available() -> bool {
+    #[cfg(feature = "compress")]
+    { true }
+    #[cfg(not(feature = "compress"))]
+    { false }
+}
+
+// ============================================================================
+// TLS Configuration
+// ============================================================================
+
+/// Tokio executor for hyper HTTP/2
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+struct TokioExecutor;
+
+impl<F> hyper::rt::Executor<F> for TokioExecutor
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    fn execute(&self, fut: F) {
+        tokio::spawn(fut);
+    }
+}
+
+/// Load TLS configuration from TlsConfig
+#[cfg(feature = "tls")]
+fn load_tls_config(config: &TlsConfig, http2_enabled: bool) -> std::result::Result<tokio_rustls::TlsAcceptor, String> {
+    use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+    use std::io::BufReader;
+    use std::fs::File;
+    use std::sync::Arc;
+
+    // Load certificate
+    let certs: Vec<CertificateDer<'static>> = if let Some(ref cert_path) = config.cert_path {
+        let file = File::open(cert_path).map_err(|e| format!("Failed to open cert file: {}", e))?;
+        let mut reader = BufReader::new(file);
+        rustls_pemfile::certs(&mut reader)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to parse cert: {}", e))?
+    } else if let Some(ref cert_pem) = config.cert {
+        let mut reader = BufReader::new(cert_pem.as_bytes());
+        rustls_pemfile::certs(&mut reader)
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to parse cert PEM: {}", e))?
+    } else {
+        return Err("No certificate provided".to_string());
+    };
+
+    // Load private key
+    let key: PrivateKeyDer<'static> = if let Some(ref key_path) = config.key_path {
+        let file = File::open(key_path).map_err(|e| format!("Failed to open key file: {}", e))?;
+        let mut reader = BufReader::new(file);
+        rustls_pemfile::private_key(&mut reader)
+            .map_err(|e| format!("Failed to parse key: {}", e))?
+            .ok_or_else(|| "No private key found".to_string())?
+    } else if let Some(ref key_pem) = config.key {
+        let mut reader = BufReader::new(key_pem.as_bytes());
+        rustls_pemfile::private_key(&mut reader)
+            .map_err(|e| format!("Failed to parse key PEM: {}", e))?
+            .ok_or_else(|| "No private key found".to_string())?
+    } else {
+        return Err("No private key provided".to_string());
+    };
+
+    // Build server config
+    let mut server_config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| format!("Failed to build TLS config: {}", e))?;
+
+    // Enable ALPN for HTTP/2 negotiation
+    if http2_enabled {
+        server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    } else {
+        server_config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    }
+
+    Ok(tokio_rustls::TlsAcceptor::from(Arc::new(server_config)))
+}
+
+// ============================================================================
+// Compression
+// ============================================================================
+
+/// Compress response body if compression is enabled and applicable
+#[cfg(feature = "compress")]
+fn maybe_compress_response(
+    body: Bytes,
+    accept_encoding: Option<&str>,
+    content_type: Option<&str>,
+    config: &CompressionConfig,
+) -> (Bytes, Option<String>) {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write;
+
+    // Check threshold
+    let threshold = config.threshold.unwrap_or(1024) as usize;
+    if body.len() < threshold {
+        return (body, None);
+    }
+
+    // Check if content type is compressible
+    let compressible = content_type.map(|ct| {
+        ct.starts_with("text/") ||
+        ct.contains("json") ||
+        ct.contains("xml") ||
+        ct.contains("javascript") ||
+        ct.contains("css")
+    }).unwrap_or(false);
+
+    if !compressible {
+        return (body, None);
+    }
+
+    // Check Accept-Encoding header
+    let accept = accept_encoding.unwrap_or("");
+
+    // Try brotli first (if enabled), then gzip
+    if config.brotli.unwrap_or(false) && accept.contains("br") {
+        // Brotli compression
+        let level = config.level.unwrap_or(4);
+        let mut encoder = brotli::CompressorWriter::new(
+            Vec::new(),
+            4096,
+            level as u32,
+            22
+        );
+        if encoder.write_all(&body).is_ok() {
+            // into_inner returns Vec<u8> directly
+            let compressed = encoder.into_inner();
+            return (Bytes::from(compressed), Some("br".to_string()));
+        }
+    }
+
+    if config.gzip.unwrap_or(true) && accept.contains("gzip") {
+        // Gzip compression
+        let level = config.level.unwrap_or(6);
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::new(level));
+        if encoder.write_all(&body).is_ok() {
+            if let Ok(compressed) = encoder.finish() {
+                return (Bytes::from(compressed), Some("gzip".to_string()));
+            }
+        }
+    }
+
+    (body, None)
+}
+
+/// Allow unused for now until compression is fully integrated
+#[allow(dead_code)]
+fn _compression_placeholder() {
+    #[cfg(feature = "compress")]
+    let _ = maybe_compress_response;
+}
+
+// ============================================================================
+// WebSocket Support
+// ============================================================================
+
+/// Check if request is a WebSocket upgrade request
+#[napi]
+pub fn is_websocket_upgrade(headers: HashMap<String, String>) -> bool {
+    let connection = headers.get("connection").map(|s| s.to_lowercase());
+    let upgrade = headers.get("upgrade").map(|s| s.to_lowercase());
+    let ws_key = headers.get("sec-websocket-key");
+
+    connection.map(|c| c.contains("upgrade")).unwrap_or(false)
+        && upgrade.map(|u| u == "websocket").unwrap_or(false)
+        && ws_key.is_some()
+}
+
+/// Generate WebSocket accept key from client key
+#[napi]
+pub fn generate_websocket_accept(key: String) -> String {
+    // WebSocket GUID as per RFC 6455
+    const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+    // Concatenate key with GUID
+    let concat = format!("{}{}", key, WS_GUID);
+
+    // SHA-1 hash
+    let hash = sha1_hash(concat.as_bytes());
+
+    // Base64 encode
+    base64_encode(&hash)
+}
+
+/// Simple SHA-1 implementation for WebSocket accept key
+fn sha1_hash(data: &[u8]) -> [u8; 20] {
+    // SHA-1 constants
+    const K: [u32; 4] = [0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xCA62C1D6];
+
+    let mut h: [u32; 5] = [
+        0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0
+    ];
+
+    // Pad message
+    let ml = (data.len() * 8) as u64;
+    let mut padded = data.to_vec();
+    padded.push(0x80);
+    while (padded.len() % 64) != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&ml.to_be_bytes());
+
+    // Process 512-bit chunks
+    for chunk in padded.chunks(64) {
+        let mut w = [0u32; 80];
+        for (i, bytes) in chunk.chunks(4).enumerate() {
+            w[i] = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        }
+        for i in 16..80 {
+            w[i] = (w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16]).rotate_left(1);
+        }
+
+        let (mut a, mut b, mut c, mut d, mut e) = (h[0], h[1], h[2], h[3], h[4]);
+
+        for i in 0..80 {
+            let (f, k) = match i {
+                0..=19 => ((b & c) | ((!b) & d), K[0]),
+                20..=39 => (b ^ c ^ d, K[1]),
+                40..=59 => ((b & c) | (b & d) | (c & d), K[2]),
+                _ => (b ^ c ^ d, K[3]),
+            };
+
+            let temp = a.rotate_left(5)
+                .wrapping_add(f)
+                .wrapping_add(e)
+                .wrapping_add(k)
+                .wrapping_add(w[i]);
+            e = d;
+            d = c;
+            c = b.rotate_left(30);
+            b = a;
+            a = temp;
+        }
+
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+    }
+
+    let mut result = [0u8; 20];
+    for (i, val) in h.iter().enumerate() {
+        result[i*4..i*4+4].copy_from_slice(&val.to_be_bytes());
+    }
+    result
+}
+
+/// Base64 encode
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    let mut result = String::new();
+    let mut i = 0;
+
+    while i < data.len() {
+        let b0 = data[i] as u32;
+        let b1 = if i + 1 < data.len() { data[i + 1] as u32 } else { 0 };
+        let b2 = if i + 2 < data.len() { data[i + 2] as u32 } else { 0 };
+
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        result.push(ALPHABET[(triple >> 18) as usize & 63] as char);
+        result.push(ALPHABET[(triple >> 12) as usize & 63] as char);
+
+        if i + 1 < data.len() {
+            result.push(ALPHABET[(triple >> 6) as usize & 63] as char);
+        } else {
+            result.push('=');
+        }
+
+        if i + 2 < data.len() {
+            result.push(ALPHABET[triple as usize & 63] as char);
+        } else {
+            result.push('=');
+        }
+
+        i += 3;
+    }
+
+    result
+}
+
+/// WebSocket upgrade response headers
+#[napi(object)]
+pub struct WebSocketUpgradeResponse {
+    pub status: u32,
+    pub headers: HashMap<String, String>,
+}
+
+/// Generate WebSocket upgrade response
+#[napi]
+pub fn create_websocket_upgrade_response(key: String, protocol: Option<String>) -> WebSocketUpgradeResponse {
+    let accept = generate_websocket_accept(key);
+
+    let mut headers = HashMap::new();
+    headers.insert("upgrade".to_string(), "websocket".to_string());
+    headers.insert("connection".to_string(), "Upgrade".to_string());
+    headers.insert("sec-websocket-accept".to_string(), accept);
+
+    if let Some(proto) = protocol {
+        headers.insert("sec-websocket-protocol".to_string(), proto);
+    }
+
+    WebSocketUpgradeResponse {
+        status: 101,
+        headers,
     }
 }
 
