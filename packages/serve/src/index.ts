@@ -261,7 +261,7 @@ export {
 export type { SecurityOptions } from './security'
 // Security Headers
 export { apiSecurity, security, strictSecurity } from './security'
-export type { ContextProvider, ServeOptions, Server, TlsOptions } from './serve'
+export type { ContextProvider, Middleware, ServeOptions, Server, TlsOptions } from './serve'
 // Server
 export { serve } from './serve'
 export type { Session, SessionData, SessionOptions, SessionStore } from './session'

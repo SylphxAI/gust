@@ -70,6 +70,11 @@ export type TlsOptions = {
 export type ContextProvider<App> = (baseCtx: BaseContext) => App | Promise<App>
 
 /**
+ * Middleware type - wraps the router handler
+ */
+export type Middleware = (handler: Handler<BaseContext>) => Handler<BaseContext>
+
+/**
  * Serve options
  */
 export type ServeOptions<App = Record<string, never>> = {
@@ -77,6 +82,8 @@ export type ServeOptions<App = Record<string, never>> = {
 	readonly hostname?: string
 	/** Routes created with get(), post(), etc. */
 	readonly routes: Route<string, string, App>[]
+	/** Global middleware - wraps the entire router */
+	readonly middleware?: Middleware
 	/** Context provider - creates app context for each request */
 	readonly context?: ContextProvider<App>
 	readonly onListen?: (info: { port: number; hostname: string; tls: boolean }) => void
@@ -201,7 +208,9 @@ export const serve = async <App = Record<string, never>>(
 	const port = options.port ?? (options.tls ? 443 : 3000)
 	const hostname = options.hostname ?? '0.0.0.0'
 	const useTls = !!options.tls
-	const handler = createHandler(options.routes, options.context)
+	const routerHandler = createHandler(options.routes, options.context)
+	// Apply global middleware if provided
+	const handler = options.middleware ? options.middleware(routerHandler) : routerHandler
 
 	// Try native server first (supports both HTTP and HTTPS)
 	if (isNativeAvailable()) {
