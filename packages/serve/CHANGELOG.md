@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.7 (2025-11-29)
+
+### 🐛 Bug Fixes
+
+- **context:** add explicit type annotation for createContext alias ([636c81b](https://github.com/SylphxAI/gust/commit/636c81b46e6d10128770a41d69a6558def6fb48f))
+- **middleware:** make cors/security/compress/rateLimit generic ([ea72a91](https://github.com/SylphxAI/gust/commit/ea72a9183aa5f5532e3b2f2a0b5d29fdd5d932c8))
+- **serve:** add WASM files to git for CI typecheck ([8263b4d](https://github.com/SylphxAI/gust/commit/8263b4df6372651cabb0019cca476838bdc374bb))
+
+### ♻️ Refactoring
+
+- **middleware:** bounded polymorphism for typed options ([25387c8](https://github.com/SylphxAI/gust/commit/25387c8a97ffd75bf359cc1a5131de2ef788907c))
+- **middleware:** polymorphic Middleware type design ([aef900e](https://github.com/SylphxAI/gust/commit/aef900e8453048bb78b794ae9da74d7b2d73ea16))
+
 ## 0.1.6 (2025-11-29)
 
 ### ✨ Features
