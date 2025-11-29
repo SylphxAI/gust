@@ -30,33 +30,65 @@ bun add @sylphx/gust
 ## Quick Start
 
 ```typescript
-import { serve, router, get, json } from '@sylphx/gust'
+import { serve, get, json } from '@sylphx/gust'
 
-const home = get('/', () => json({ message: 'Hello World' }))
-const user = get('/users/:id', (ctx) => json({ id: ctx.params.id }))
+const routes = [
+  get('/', () => json({ message: 'Hello World' })),
+  get('/users/:id', ({ ctx }) => json({ id: ctx.params.id })),
+]
 
-const app = router({ home, user })
-
-// Type-safe URL generation (routes are callable)
-app.home()           // "/"
-app.user({ id: 42 }) // "/users/42"
-
-// Route properties
-app.home.path        // "/"
-app.home.method      // "GET"
-app.user.path        // "/users/:id"
-
-serve({ port: 3000, fetch: app.handler })
+serve({ routes, port: 3000 })
 ```
 
 ## Examples
+
+### With App Context
+
+```typescript
+import { serve, createRouter, json, notFound } from '@sylphx/gust'
+
+// Define your app context type
+type App = {
+  db: Database
+  user: User | null
+}
+
+// Create typed route builders
+const { get, post } = createRouter<App>()
+
+const routes = [
+  get('/users', ({ ctx }) => {
+    const users = ctx.app.db.getUsers()
+    return json(users)
+  }),
+
+  get('/users/:id', ({ ctx }) => {
+    const user = ctx.app.db.getUser(ctx.params.id)
+    return user ? json(user) : notFound()
+  }),
+
+  get('/profile', ({ ctx }) => {
+    return ctx.app.user
+      ? json(ctx.app.user)
+      : notFound()
+  }),
+]
+
+serve({
+  routes,
+  context: (baseCtx) => ({
+    db: createDatabase(),
+    user: getUserFromToken(baseCtx.headers.authorization),
+  }),
+  port: 3000,
+})
+```
 
 ### With Middleware
 
 ```typescript
 import {
   serve,
-  router,
   get,
   post,
   json,
@@ -69,33 +101,25 @@ import {
   parseJsonBody,
 } from '@sylphx/gust'
 
-// Public routes
-const health = get('/health', () => json({ status: 'ok' }))
+const routes = [
+  get('/health', () => json({ status: 'ok' })),
+  get('/me', ({ ctx }) => json(getJwtPayload(ctx))),
+  post('/posts', async ({ ctx }) => {
+    const body = await parseJsonBody(ctx)
+    return json({ created: body })
+  }),
+]
 
-// Protected routes
-const me = get('/me', (ctx) => json(getJwtPayload(ctx)))
-const createPost = post('/posts', async (ctx) => {
-  const body = await parseJsonBody(ctx)
-  return json({ created: body })
+serve({
+  routes,
+  middleware: compose(
+    cors(),
+    compress(),
+    rateLimit({ max: 100, window: 60000 }),
+    jwtAuth({ secret: process.env.JWT_SECRET! }),
+  ),
+  port: 3000,
 })
-
-const protectedRoutes = compose(
-  jwtAuth({ secret: process.env.JWT_SECRET! }),
-  router({ me, createPost }).handler
-)
-
-const publicRoutes = router({ health }).handler
-
-const app = compose(
-  cors(),
-  compress(),
-  rateLimit({ max: 100, window: 60000 }),
-  (ctx) => ctx.path.startsWith('/me') || ctx.path.startsWith('/posts')
-    ? protectedRoutes(ctx)
-    : publicRoutes(ctx)
-)
-
-serve({ port: 3000, fetch: app })
 ```
 
 ### WebSocket
@@ -116,194 +140,261 @@ serve({
 ### Streaming (SSE)
 
 ```typescript
-import { serve, router, get, sseStream } from '@sylphx/gust'
+import { serve, get, sse } from '@sylphx/gust'
 
-const events = get('/events', () =>
-  sseStream(async function* () {
-    for (let i = 1; i <= 5; i++) {
-      yield { data: { count: i }, id: i }
-      await new Promise((r) => setTimeout(r, 1000))
-    }
-  })
-)
+const routes = [
+  // Generator mode (pull-based) - for known sequences
+  get('/countdown', () =>
+    sse(async function* () {
+      for (let i = 10; i >= 0; i--) {
+        yield { data: { count: i } }
+        await new Promise((r) => setTimeout(r, 1000))
+      }
+    })
+  ),
 
-const app = router({ events })
+  // Handler mode (push-based) - for external events
+  get('/notifications', () =>
+    sse(async (emit) => {
+      emit({ data: 'connected' })
 
-serve({ port: 3000, fetch: app.handler })
+      const handler = (data: unknown) => emit({ data })
+      pubsub.subscribe('updates', handler)
+
+      // Return cleanup function
+      return () => pubsub.unsubscribe('updates', handler)
+    })
+  ),
+]
+
+serve({ routes, port: 3000 })
 ```
 
 ### Streaming (NDJSON)
 
 ```typescript
-import { serve, router, get, ndjsonStream } from '@sylphx/gust'
+import { serve, get, ndjsonStream } from '@sylphx/gust'
 
-const stream = get('/data', () =>
-  ndjsonStream(async function* () {
-    yield { id: 1, name: 'Alice' }
-    yield { id: 2, name: 'Bob' }
-    yield { id: 3, name: 'Charlie' }
-  })
-)
+const routes = [
+  get('/data', () =>
+    ndjsonStream(async function* () {
+      yield { id: 1, name: 'Alice' }
+      yield { id: 2, name: 'Bob' }
+      yield { id: 3, name: 'Charlie' }
+    })
+  ),
+]
 
-const app = router({ stream })
-
-serve({ port: 3000, fetch: app.handler })
+serve({ routes, port: 3000 })
 ```
 
 ### Streaming (File)
 
 ```typescript
 import { createReadStream } from 'node:fs'
-import { serve, router, get, streamFile } from '@sylphx/gust'
+import { serve, get, streamFile } from '@sylphx/gust'
 
-const download = get('/download', () =>
-  streamFile(createReadStream('./large-file.zip'), {
-    headers: { 'content-type': 'application/zip' },
-  })
-)
+const routes = [
+  get('/download', () =>
+    streamFile(createReadStream('./large-file.zip'), {
+      headers: { 'content-type': 'application/zip' },
+    })
+  ),
+]
 
-const app = router({ download })
-
-serve({ port: 3000, fetch: app.handler })
+serve({ routes, port: 3000 })
 ```
 
 ### Static Files
 
 ```typescript
-import { serve, serveStatic, router, get, json } from '@sylphx/gust'
+import { serve, get, json, serveStatic } from '@sylphx/gust'
 
-const api = get('/api/hello', () => json({ hello: 'world' }))
-const app = router({ api })
+const routes = [
+  get('/api/hello', () => json({ hello: 'world' })),
+]
 
 serve({
+  routes,
+  fallback: serveStatic({ root: './public' }),
   port: 3000,
-  fetch: (ctx) => {
-    if (ctx.path.startsWith('/api')) {
-      return app.handler(ctx)
-    }
-    return serveStatic({ root: './public' })(ctx)
-  },
 })
 ```
 
 ### Health Checks (Kubernetes)
 
 ```typescript
-import { serve, router, get, liveness, readiness, health, memoryCheck } from '@sylphx/gust'
+import { serve, get, liveness, readiness, health, memoryCheck } from '@sylphx/gust'
 
-const live = get('/healthz', liveness())
-const ready = get('/ready', readiness([memoryCheck(90)]))
-const detailed = get('/health', health({ checks: [memoryCheck(90)], detailed: true }))
+const routes = [
+  get('/healthz', liveness()),
+  get('/ready', readiness([memoryCheck(90)])),
+  get('/health', health({ checks: [memoryCheck(90)], detailed: true })),
+]
 
-const app = router({ live, ready, detailed })
-
-serve({ port: 3000, fetch: app.handler })
+serve({ routes, port: 3000 })
 ```
 
 ### Validation
 
 ```typescript
-import { serve, router, post, json, compose, validate, object, string, email, number, getValidated } from '@sylphx/gust'
+import { serve, post, json, compose, validate, object, string, email, number, getValidated } from '@sylphx/gust'
 
-const createUser = post('/users', compose(
-  validate({
-    body: object({
-      name: string({ minLength: 1 }),
-      email: email(),
-      age: number({ min: 0 }),
+const routes = [
+  post('/users', compose(
+    validate({
+      body: object({
+        name: string({ minLength: 1 }),
+        email: email(),
+        age: number({ min: 0 }),
+      }),
     }),
-  }),
-  async (ctx) => {
-    const data = getValidated(ctx)
-    return json({ user: data })
-  }
-))
+    async ({ ctx }) => {
+      const data = getValidated(ctx)
+      return json({ user: data })
+    }
+  )),
+]
 
-const app = router({ createUser })
-
-serve({ port: 3000, fetch: app.handler })
+serve({ routes, port: 3000 })
 ```
 
 ### Session & CSRF
 
 ```typescript
-import { serve, router, get, post, html, json, compose, session, csrf, getCsrfToken, getSession } from '@sylphx/gust'
+import { serve, get, post, html, json, compose, session, csrf, getCsrfToken, getSession } from '@sylphx/gust'
 
-const form = get('/form', (ctx) => html(`
-  <form method="POST" action="/submit">
-    <input type="hidden" name="_csrf" value="${getCsrfToken(ctx)}">
-    <button type="submit">Submit</button>
-  </form>
-`))
+const routes = [
+  get('/form', ({ ctx }) => html(`
+    <form method="POST" action="/submit">
+      <input type="hidden" name="_csrf" value="${getCsrfToken(ctx)}">
+      <button type="submit">Submit</button>
+    </form>
+  `)),
 
-const submit = post('/submit', (ctx) => {
-  const sess = getSession(ctx)
-  sess.data.visits = ((sess.data.visits as number) || 0) + 1
-  return json({ visits: sess.data.visits })
+  post('/submit', ({ ctx }) => {
+    const sess = getSession(ctx)
+    sess.data.visits = ((sess.data.visits as number) || 0) + 1
+    return json({ visits: sess.data.visits })
+  }),
+]
+
+serve({
+  routes,
+  middleware: compose(
+    session({ secret: 'your-secret' }),
+    csrf({ secret: 'csrf-secret' }),
+  ),
+  port: 3000,
 })
-
-const app = compose(
-  session({ secret: 'your-secret' }),
-  csrf({ secret: 'csrf-secret' }),
-  router({ form, submit }).handler
-)
-
-serve({ port: 3000, fetch: app })
 ```
 
 ### Circuit Breaker
 
 ```typescript
-import { serve, router, get, json, compose, circuitBreaker } from '@sylphx/gust'
+import { serve, get, json, compose, circuitBreaker } from '@sylphx/gust'
 
-const external = get('/external', compose(
-  circuitBreaker({
-    failureThreshold: 5,
-    resetTimeout: 30000,
-  }),
-  async () => {
-    const res = await fetch('https://api.example.com/data')
-    return json(await res.json())
-  }
-))
+const routes = [
+  get('/external', compose(
+    circuitBreaker({
+      failureThreshold: 5,
+      resetTimeout: 30000,
+    }),
+    async () => {
+      const res = await fetch('https://api.example.com/data')
+      return json(await res.json())
+    }
+  )),
+]
 
-const app = router({ external })
-
-serve({ port: 3000, fetch: app.handler })
+serve({ routes, port: 3000 })
 ```
 
 ### OpenTelemetry
 
 ```typescript
-import { serve, router, get, json, compose, otel, createTracer, consoleExporter } from '@sylphx/gust'
+import { serve, get, json, compose, otel, createTracer, consoleExporter } from '@sylphx/gust'
 
 const tracer = createTracer(consoleExporter)
 
-const hello = get('/', () => json({ hello: 'world' }))
-const app = router({ hello })
+const routes = [
+  get('/', () => json({ hello: 'world' })),
+]
 
 serve({
+  routes,
+  middleware: otel({ tracer }),
   port: 3000,
-  fetch: compose(otel({ tracer }), app.handler),
 })
 ```
 
 ### Cluster Mode
 
 ```typescript
-import { clusterServe, router, get, json } from '@sylphx/gust'
+import { clusterServe, get, json } from '@sylphx/gust'
 
-const index = get('/', () => json({ pid: process.pid }))
-const app = router({ index })
+const routes = [
+  get('/', () => json({ pid: process.pid })),
+]
 
 clusterServe({
+  routes,
   port: 3000,
-  fetch: app.handler,
   workers: 4,
 })
 ```
 
 ## API Reference
+
+### Handler Signature
+
+All route handlers receive `{ ctx, input }`:
+
+```typescript
+import { get, json } from '@sylphx/gust'
+
+get('/users/:id', ({ ctx, input }) => {
+  // ctx.method      - HTTP method
+  // ctx.path        - Request path
+  // ctx.query       - Query string
+  // ctx.headers     - Request headers
+  // ctx.params      - Path parameters (typed!)
+  // ctx.body        - Request body (Buffer)
+  // ctx.json<T>()   - Parse JSON body
+  // ctx.app         - User-defined context
+
+  return json({ id: ctx.params.id })
+})
+```
+
+### Context Types
+
+```typescript
+import { serve, createRouter, type Context, type BaseContext } from '@sylphx/gust'
+
+// BaseContext - HTTP request data (library-provided)
+type BaseContext = {
+  readonly method: string
+  readonly path: string
+  readonly query: string
+  readonly headers: Record<string, string>
+  readonly params: Record<string, string>
+  readonly body: Buffer
+  readonly json: <T>() => T
+}
+
+// Context<App> - BaseContext + user's app context
+type Context<App> = BaseContext & { readonly app: App }
+
+// Define your app type
+type App = { db: Database; user: User | null }
+
+// Create typed routes
+const { get, post } = createRouter<App>()
+
+// ctx.app.db and ctx.app.user are fully typed
+const route = get('/users', ({ ctx }) => json(ctx.app.db.getUsers()))
+```
 
 ### Response Helpers
 
@@ -325,12 +416,18 @@ serverError()                      // 500
 ### Streaming Helpers
 
 ```typescript
-import { sseStream, streamText, ndjsonStream, streamFile } from '@sylphx/gust'
+import { sse, streamText, ndjsonStream, streamFile } from '@sylphx/gust'
 
-// Server-Sent Events
-sseStream(async function* () {
-  yield { data: 'hello', id: 1 }
+// Server-Sent Events (unified API)
+sse(async function* () {
+  yield { data: 'hello', id: '1' }
   yield { data: { json: true }, event: 'update' }
+})
+
+// Or with push-based handler
+sse(async (emit) => {
+  emit({ data: 'connected' })
+  return () => cleanup()
 })
 
 // Plain text streaming
@@ -355,46 +452,68 @@ streamFile(createReadStream('./file.zip'))
 import { compose, pipe } from '@sylphx/gust'
 
 // compose: right-to-left (outer to inner)
-const app = compose(cors(), compress(), handler)
+const middleware = compose(cors(), compress(), handler)
 
 // pipe: left-to-right (first to last)
-const app = pipe(handler, compress(), cors())
+const middleware = pipe(handler, compress(), cors())
+```
+
+### Route Grouping
+
+```typescript
+import { get, post, routes, json, text } from '@sylphx/gust'
+
+// Prefix routes with a path segment
+const memberRoutes = routes('/members', [
+  get('/', () => json(getAll())),
+  get('/:id', ({ ctx }) => json(getOne(ctx.params.id))),
+  post('/', () => json(create())),
+])
+
+// Nested routes
+const adminRoutes = routes('/admin', [
+  get('/dashboard', () => text('dashboard')),
+  ...routes('/users', [
+    get('/', () => text('list')),       // /admin/users
+    get('/:id', () => text('show')),    // /admin/users/:id
+  ]),
+])
+
+serve({
+  routes: [
+    get('/', () => json({ home: true })),
+    ...memberRoutes,
+    ...adminRoutes,
+  ],
+  port: 3000,
+})
 ```
 
 ### Type-Safe Routes
 
 ```typescript
-import { router, get, post, prefix, merge } from '@sylphx/gust'
+import { get, createRouter, json } from '@sylphx/gust'
 
-// Routes with typed params
-const user = get('/users/:id', (ctx) => {
+// Simple routes (no app context)
+const user = get('/users/:id', ({ ctx }) => {
   ctx.params.id  // string (type-safe!)
   return json({ id: ctx.params.id })
 })
 
-const postRoute = get('/users/:userId/posts/:postId', (ctx) => {
-  ctx.params.userId  // string
-  ctx.params.postId  // string
-  return json(ctx.params)
+// With app context (explicit type)
+type App = { db: Database }
+const users = get<App>('/users', ({ ctx }) => {
+  ctx.app.db  // Database (typed!)
+  return json(ctx.app.db.getUsers())
 })
 
-// Named routes with URL generation
-const app = router({ user, post: postRoute })
-app.user({ id: 42 })                    // "/users/42"
-app.post({ userId: 1, postId: 99 })     // "/users/1/posts/99"
+// Or use createRouter factory (type currying)
+const { get: typedGet, routes: typedRoutes } = createRouter<App>()
 
-// Route properties
-app.user.path                           // "/users/:id"
-app.user.method                         // "GET"
-
-// Route grouping with prefix()
-const userRoutes = prefix('/users', {
-  list: get('/', listHandler),
-  show: get('/:id', showHandler),
-})
-const allRoutes = merge({ home: get('/', homeHandler) }, userRoutes)
-// allRoutes.list.path → "/users"
-// allRoutes.show.path → "/users/:id"
+const memberRoutes = typedRoutes('/members', [
+  typedGet('/', ({ ctx }) => json(ctx.app.db.getMembers())),
+  typedGet('/:id', ({ ctx }) => json(ctx.app.db.getMember(ctx.params.id))),
+])
 ```
 
 ## License
@@ -403,4 +522,4 @@ MIT
 
 ---
 
-✨ Powered by [Sylphx](https://github.com/SylphxAI)
+Built with [Sylphx](https://github.com/SylphxAI)

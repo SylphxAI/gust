@@ -112,7 +112,7 @@ export {
 export type { CompressionOptions } from './compress'
 // Compression
 export { brotli, compress, gzip } from './compress'
-export type { Context } from './context'
+export type { BaseContext, Context, HandlerArgs, RouteHandler } from './context'
 // Context
 export { createContext, parseHeaders, withParams } from './context'
 export type { Cookie, CookieOptions } from './cookie'
@@ -244,25 +244,24 @@ export {
 export type { RateLimitOptions, RateLimitStore2 } from './rateLimit'
 // Rate Limiting
 export { rateLimit, rateLimitWithStore } from './rateLimit'
-export type { Route, RouteAccessor, Router, Routes } from './router'
+export type { Route, RouteHandlerFn, Routes, TypedRouteBuilders } from './router'
 // Router
 export {
 	all,
+	createRouter,
 	del,
 	get,
 	head,
-	merge,
 	options,
 	patch,
 	post,
-	prefix,
 	put,
-	router,
+	routes,
 } from './router'
 export type { SecurityOptions } from './security'
 // Security Headers
 export { apiSecurity, security, strictSecurity } from './security'
-export type { ServeOptions, Server, TlsOptions } from './serve'
+export type { ContextProvider, ServeOptions, Server, TlsOptions } from './serve'
 // Server
 export { serve } from './serve'
 export type { Session, SessionData, SessionOptions, SessionStore } from './session'
@@ -274,16 +273,34 @@ export {
 	MemoryStore,
 	session,
 } from './session'
-export type { SSEEvent, SSEMessage } from './sse'
+export type {
+	NativeSSEResponse,
+	NativeSseWriter,
+	SSECleanup,
+	SSEEmit,
+	SSEEvent,
+	SSEGenerator,
+	SSEHandler,
+	// Legacy types
+	SSEMessage,
+	SSEOptions,
+	SSESource,
+} from './sse'
 // Server-Sent Events
 export {
+	// Legacy API (deprecated)
 	createSSE,
 	formatSSE,
 	formatSSEEvent,
+	isNativeSSEAvailable,
+	// Native SSE (for GustServer direct integration)
+	nativeSSE,
 	SSEClient,
+	// Unified API (recommended)
 	sse,
 	sseEvent,
 	sseHeaders,
+	sseRaw,
 	sseStream,
 	textStream,
 } from './sse'

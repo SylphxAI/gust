@@ -16,9 +16,10 @@ import { createServer, type Server as NetServer, type Socket } from 'node:net'
 import { createServer as createTlsServer, type TLSSocket, type Server as TlsServer } from 'node:tls'
 import type { Handler, ServerResponse, WasmCore } from '@sylphx/gust-core'
 import { getWasm, initWasm, isStreamingBody, serverError } from '@sylphx/gust-core'
-import type { Context } from './context'
+import type { BaseContext, Context } from './context'
 import { createContext, parseHeaders } from './context'
 import { isNativeAvailable, isTlsAvailable, loadNativeBinding } from './native'
+import type { Route, RouteHandlerFn } from './router'
 
 // Default keep-alive timeout (5 seconds)
 const DEFAULT_KEEP_ALIVE_TIMEOUT = 5000
@@ -62,10 +63,22 @@ export type TlsOptions = {
 	readonly passphrase?: string
 }
 
-export type ServeOptions = {
+/**
+ * Context provider function - creates app context for each request
+ * Can be sync (static context) or async (per-request context)
+ */
+export type ContextProvider<App> = (baseCtx: BaseContext) => App | Promise<App>
+
+/**
+ * Serve options
+ */
+export type ServeOptions<App = Record<string, never>> = {
 	readonly port?: number
 	readonly hostname?: string
-	readonly fetch: Handler<Context>
+	/** Routes created with get(), post(), etc. */
+	readonly routes: Route<string, string, App>[]
+	/** Context provider - creates app context for each request */
+	readonly context?: ContextProvider<App>
 	readonly onListen?: (info: { port: number; hostname: string; tls: boolean }) => void
 	readonly onError?: (error: Error) => void
 	readonly keepAliveTimeout?: number
@@ -93,36 +106,119 @@ export type Server = {
 }
 
 /**
+ * Create handler from routes and optional context provider
+ */
+const createHandler = <App>(
+	routes: Route<string, string, App>[],
+	contextProvider?: ContextProvider<App>
+): Handler<BaseContext> => {
+	type WasmRouterType = {
+		insert: (m: string, p: string, id: number) => void
+		find: (
+			m: string,
+			p: string
+		) => { found: boolean; handler_id: number; params: string[]; free: () => void }
+	}
+
+	let wasmRouter: WasmRouterType | null = null
+	const handlers: RouteHandlerFn<App, string>[] = []
+
+	const initRouter = () => {
+		if (wasmRouter) return wasmRouter
+		const wasm = getWasm()
+		wasmRouter = new wasm.WasmRouter() as WasmRouterType
+
+		for (const route of routes) {
+			const handlerId = handlers.length
+			handlers.push(route.handler as RouteHandlerFn<App, string>)
+			wasmRouter.insert(route.method, route.path, handlerId)
+
+			if (route.method === '*') {
+				for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']) {
+					wasmRouter.insert(method, route.path, handlerId)
+				}
+			}
+		}
+		return wasmRouter
+	}
+
+	return async (baseCtx: BaseContext) => {
+		const r = initRouter()
+		const match = r.find(baseCtx.method, baseCtx.path)
+
+		if (!match.found) {
+			match.free()
+			return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not Found' }
+		}
+
+		const h = handlers[match.handler_id]
+		const params: Record<string, string> = {}
+
+		const paramArray = match.params
+		for (let i = 0; i < paramArray.length; i += 2) {
+			const key = paramArray[i]
+			const value = paramArray[i + 1]
+			if (key !== undefined && value !== undefined) {
+				params[key] = value
+			}
+		}
+		match.free()
+
+		if (!h) {
+			return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not Found' }
+		}
+
+		// Create full context with app
+		const app = contextProvider ? await contextProvider(baseCtx) : ({} as App)
+		const ctx = { ...baseCtx, params, app } as Context<App> & { params: Record<string, string> }
+
+		return h({ ctx, input: undefined as void })
+	}
+}
+
+/**
  * Start the HTTP/HTTPS server
+ *
+ * @example
+ * ```ts
+ * type App = { db: Database }
+ * const { get } = createRouter<App>()
+ *
+ * serve({
+ *   routes: [get('/users', ({ ctx }) => json(ctx.app.db.getUsers()))],
+ *   context: () => ({ db: createDb() }),
+ *   port: 3000,
+ * })
+ * ```
  *
  * Architecture:
  * - Primary: Rust native server via napi-rs (~220k req/s) - full feature support
  * - Fallback: Node.js net/tls + WASM HTTP parser (edge/serverless)
- *
- * The native server transparently handles all dynamic routes with full context
- * (method, path, params, query, headers, body).
  */
-export const serve = async (options: ServeOptions): Promise<Server> => {
+export const serve = async <App = Record<string, never>>(
+	options: ServeOptions<App>
+): Promise<Server> => {
 	const port = options.port ?? (options.tls ? 443 : 3000)
 	const hostname = options.hostname ?? '0.0.0.0'
 	const useTls = !!options.tls
+	const handler = createHandler(options.routes, options.context)
 
 	// Try native server first (supports both HTTP and HTTPS)
 	if (isNativeAvailable()) {
 		// For TLS, check if native TLS is available
 		if (useTls && !isTlsAvailable()) {
 			// Native doesn't have TLS support compiled in, use JS fallback
-			return serveJs(options, port, hostname, useTls)
+			return serveJs(options, handler, port, hostname, useTls)
 		}
 
-		const nativeServer = await serveNative(options, port, hostname, useTls)
+		const nativeServer = await serveNative(options, handler, port, hostname, useTls)
 		if (nativeServer) {
 			return nativeServer
 		}
 	}
 
 	// Fallback to pure JS
-	return serveJs(options, port, hostname, useTls)
+	return serveJs(options, handler, port, hostname, useTls)
 }
 
 /**
@@ -134,16 +230,15 @@ export const serve = async (options: ServeOptions): Promise<Server> => {
  * - Middleware (CORS, rate limiting, security) runs in Rust
  * - Supports TLS/HTTPS when compiled with 'tls' feature
  */
-const serveNative = async (
-	options: ServeOptions,
+const serveNative = async <App>(
+	options: ServeOptions<App>,
+	handler: Handler<BaseContext>,
 	port: number,
 	hostname: string,
 	useTls: boolean
 ): Promise<Server | null> => {
 	const binding = loadNativeBinding()
 	if (!binding) return null
-
-	const handler = options.fetch
 
 	try {
 		const server = new binding.GustServer()
@@ -199,8 +294,8 @@ const serveNative = async (
 				// Parse body if present
 				const bodyBuffer = ctx.body ? Buffer.from(ctx.body) : Buffer.alloc(0)
 
-				// Create full context for the handler
-				const fullCtx: Context = {
+				// Create base context for the handler
+				const fullCtx: BaseContext = {
 					method: ctx.method,
 					path: ctx.path,
 					query: ctx.query ?? '',
@@ -280,8 +375,9 @@ const serveNative = async (
 /**
  * Pure JS server implementation using node:net + WASM HTTP parser
  */
-const serveJs = async (
-	options: ServeOptions,
+const serveJs = async <App>(
+	options: ServeOptions<App>,
+	handler: Handler<BaseContext>,
 	port: number,
 	hostname: string,
 	useTls: boolean
@@ -289,8 +385,6 @@ const serveJs = async (
 	// Initialize WASM
 	await initWasm()
 	const wasm = getWasm()
-
-	const handler = options.fetch
 	const keepAliveTimeout = options.keepAliveTimeout ?? DEFAULT_KEEP_ALIVE_TIMEOUT
 	const maxRequests = options.maxRequestsPerConnection ?? DEFAULT_MAX_REQUESTS
 	const requestTimeout = options.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
@@ -417,7 +511,7 @@ type ConnectionState = {
  */
 const handleConnection = (
 	socket: Socket | TLSSocket,
-	handler: Handler<Context>,
+	handler: Handler<BaseContext>,
 	wasm: WasmCore,
 	config: ConnectionConfig
 ): void => {

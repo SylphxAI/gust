@@ -1,11 +1,11 @@
 /**
- * Router Tests - Route Definition and Group Functions
- * Comprehensive tests covering all edge cases
+ * Router Tests - Route Definition Functions
+ * Comprehensive tests covering route builders and createRouter factory
  */
 
 import { describe, expect, it } from 'bun:test'
-import { text } from '@sylphx/gust-core'
-import { all, del, get, group, head, merge, options, patch, post, prefix, put, router } from '../src/router'
+import { json, text } from '@sylphx/gust-core'
+import { all, createRouter, del, get, head, options, patch, post, put, routes } from '../src/router'
 
 describe('Router', () => {
 	describe('route definitions', () => {
@@ -56,112 +56,6 @@ describe('Router', () => {
 			const route = all('/users', () => text('ok'))
 			expect(route.method).toBe('*')
 			expect(route.path).toBe('/users')
-		})
-	})
-
-	describe('router with prefix', () => {
-		it('should create prefixed routes', () => {
-			const api = router('/api', {
-				health: get('/health', () => text('ok')),
-				users: get('/users', () => text('ok')),
-			})
-
-			expect(api.health.path).toBe('/api/health')
-			expect(api.users.path).toBe('/api/users')
-		})
-
-		it('should generate prefixed URLs', () => {
-			const api = router('/api', {
-				health: get('/health', () => text('ok')),
-				user: get('/users/:id', () => text('ok')),
-			})
-
-			expect(api.health()).toBe('/api/health')
-			expect(api.user({ id: 42 })).toBe('/api/users/42')
-		})
-
-		it('should work without prefix', () => {
-			const app = router({
-				health: get('/health', () => text('ok')),
-			})
-
-			expect(app.health.path).toBe('/health')
-			expect(app.health()).toBe('/health')
-		})
-	})
-
-	describe('route groups (legacy)', () => {
-		it('should prefix routes with spread operator', () => {
-			const routes = group(
-				'/api',
-				get('/users', () => text('ok')),
-				get('/posts', () => text('ok'))
-			)
-
-			expect(routes).toHaveLength(2)
-			expect(routes[0].path).toBe('/api/users')
-			expect(routes[1].path).toBe('/api/posts')
-		})
-
-		it('should handle nested groups', () => {
-			const routes = group(
-				'/api',
-				...group(
-					'/v1',
-					get('/users', () => text('ok'))
-				),
-				...group(
-					'/v2',
-					get('/users', () => text('ok'))
-				)
-			)
-
-			expect(routes).toHaveLength(2)
-			expect(routes[0].path).toBe('/api/v1/users')
-			expect(routes[1].path).toBe('/api/v2/users')
-		})
-
-		it('should handle empty prefix', () => {
-			const routes = group(
-				'',
-				get('/users', () => text('ok'))
-			)
-
-			expect(routes[0].path).toBe('/users')
-		})
-
-		it('should handle root prefix', () => {
-			const routes = group(
-				'/',
-				get('users', () => text('ok'))
-			)
-
-			expect(routes[0].path).toBe('/users')
-		})
-
-		it('should preserve method in groups', () => {
-			const routes = group(
-				'/api',
-				get('/read', () => text('ok')),
-				post('/create', () => text('ok')),
-				put('/update', () => text('ok')),
-				del('/delete', () => text('ok'))
-			)
-
-			expect(routes[0].method).toBe('GET')
-			expect(routes[1].method).toBe('POST')
-			expect(routes[2].method).toBe('PUT')
-			expect(routes[3].method).toBe('DELETE')
-		})
-
-		it('should preserve handler references', () => {
-			const handler1 = () => text('handler1')
-			const handler2 = () => text('handler2')
-
-			const routes = group('/api', get('/a', handler1), get('/b', handler2))
-
-			expect(routes[0].handler).toBe(handler1)
-			expect(routes[1].handler).toBe(handler2)
 		})
 	})
 
@@ -220,6 +114,32 @@ describe('Router', () => {
 			const route = get('/search/:query', () => text('ok'))
 			expect(route.path).toBe('/search/:query')
 		})
+
+		it('should handle single character paths', () => {
+			const route = get('/a', () => text('ok'))
+			expect(route.path).toBe('/a')
+		})
+
+		it('should handle numeric-like path segments', () => {
+			const route = get('/v1/users/123', () => text('ok'))
+			expect(route.path).toBe('/v1/users/123')
+		})
+
+		it('should handle very long paths', () => {
+			const longPath = `/${'segment/'.repeat(50)}end`
+			const route = get(longPath, () => text('ok'))
+			expect(route.path).toBe(longPath)
+		})
+
+		it('should handle paths with encoded characters', () => {
+			const route = get('/users/%20name', () => text('ok'))
+			expect(route.path).toBe('/users/%20name')
+		})
+
+		it('should handle consecutive slashes (not normalized)', () => {
+			const route = get('//users//list', () => text('ok'))
+			expect(route.path).toBe('//users//list')
+		})
 	})
 
 	describe('handler functions', () => {
@@ -242,108 +162,9 @@ describe('Router', () => {
 		})
 
 		it('should accept handlers with context parameter', () => {
-			const handler = (ctx: any) => text(`path: ${ctx.path}`)
+			const handler = ({ ctx }: any) => text(`path: ${ctx.path}`)
 			const route = get('/test', handler)
 			expect(route.handler).toBe(handler)
-		})
-	})
-
-	describe('edge cases', () => {
-		it('should handle empty group', () => {
-			const routes = group('/api')
-			expect(routes).toHaveLength(0)
-		})
-
-		it('should handle deep nesting', () => {
-			const routes = group(
-				'/a',
-				...group(
-					'/b',
-					...group(
-						'/c',
-						...group(
-							'/d',
-							get('/e', () => text('ok'))
-						)
-					)
-				)
-			)
-
-			expect(routes[0].path).toBe('/a/b/c/d/e')
-		})
-
-		it('should handle multiple routes in group', () => {
-			const routes = group(
-				'/api',
-				get('/a', () => text('a')),
-				get('/b', () => text('b')),
-				get('/c', () => text('c')),
-				get('/d', () => text('d')),
-				get('/e', () => text('e'))
-			)
-
-			expect(routes).toHaveLength(5)
-		})
-
-		it('should handle single character paths', () => {
-			const route = get('/a', () => text('ok'))
-			expect(route.path).toBe('/a')
-		})
-
-		it('should handle numeric-like path segments', () => {
-			const route = get('/v1/users/123', () => text('ok'))
-			expect(route.path).toBe('/v1/users/123')
-		})
-
-		it('should handle mixed method groups', () => {
-			const routes = group(
-				'/api',
-				get('/resource', () => text('get')),
-				post('/resource', () => text('post')),
-				put('/resource/:id', () => text('put')),
-				patch('/resource/:id', () => text('patch')),
-				del('/resource/:id', () => text('delete')),
-				head('/resource', () => text('head')),
-				options('/resource', () => text('options')),
-				all('/catch-all', () => text('all'))
-			)
-
-			expect(routes).toHaveLength(8)
-			expect(routes.map((r) => r.method)).toEqual(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', '*'])
-		})
-
-		it('should handle very long paths', () => {
-			const longPath = `/${'segment/'.repeat(50)}end`
-			const route = get(longPath, () => text('ok'))
-			expect(route.path).toBe(longPath)
-		})
-
-		it('should handle paths with encoded characters', () => {
-			const route = get('/users/%20name', () => text('ok'))
-			expect(route.path).toBe('/users/%20name')
-		})
-
-		it('should handle consecutive slashes (not normalized)', () => {
-			const route = get('//users//list', () => text('ok'))
-			expect(route.path).toBe('//users//list')
-		})
-
-		it('should handle group with all HTTP methods', () => {
-			const routes = group(
-				'/test',
-				get('/', () => text('get')),
-				post('/', () => text('post')),
-				put('/', () => text('put')),
-				patch('/', () => text('patch')),
-				del('/', () => text('delete')),
-				head('/', () => text('head')),
-				options('/', () => text('options'))
-			)
-
-			expect(routes).toHaveLength(7)
-			routes.forEach((route) => {
-				expect(route.path).toBe('/test/')
-			})
 		})
 	})
 
@@ -355,15 +176,6 @@ describe('Router', () => {
 
 			expect(route1).not.toBe(route2)
 			expect(route1.path).not.toBe(route2.path)
-		})
-
-		it('should not share route objects between groups', () => {
-			const handler = () => text('ok')
-			const routes1 = group('/api1', get('/users', handler))
-			const routes2 = group('/api2', get('/users', handler))
-
-			expect(routes1[0]).not.toBe(routes2[0])
-			expect(routes1[0].path).not.toBe(routes2[0].path)
 		})
 	})
 
@@ -383,116 +195,206 @@ describe('Router', () => {
 		})
 	})
 
-	describe('router()', () => {
-		it('should create router from named routes', () => {
-			const home = get('/', () => text('home'))
-			const about = get('/about', () => text('about'))
+	describe('createRouter factory', () => {
+		it('should create typed route builders', () => {
+			const { get: typedGet, post: typedPost } = createRouter<{ db: string }>()
 
-			const app = router({ home, about })
+			const users = typedGet('/users', ({ ctx }) => json({ db: ctx.app.db }))
+			const create = typedPost('/users', ({ ctx }) => json({ created: true }))
 
-			expect(app).toHaveProperty('handler')
-			expect(typeof app.handler).toBe('function')
+			expect(users.method).toBe('GET')
+			expect(users.path).toBe('/users')
+			expect(create.method).toBe('POST')
+			expect(create.path).toBe('/users')
 		})
 
-		it('should expose route accessors directly', () => {
-			const home = get('/', () => text('home'))
-			const users = get('/users', () => text('users'))
+		it('should provide all HTTP method builders', () => {
+			const router = createRouter<{}>()
 
-			const app = router({ home, users })
-
-			// Each route is accessible directly on the router
-			expect(app.home.path).toBe('/')
-			expect(app.home.method).toBe('GET')
-			expect(app.users.path).toBe('/users')
-			expect(app.users.method).toBe('GET')
+			expect(router.get).toBeDefined()
+			expect(router.post).toBeDefined()
+			expect(router.put).toBeDefined()
+			expect(router.patch).toBeDefined()
+			expect(router.del).toBeDefined()
+			expect(router.head).toBeDefined()
+			expect(router.options).toBeDefined()
+			expect(router.all).toBeDefined()
 		})
 
-		it('should generate URLs for static routes', () => {
-			const home = get('/', () => text('home'))
-			const about = get('/about', () => text('about'))
+		it('should create routes with correct methods', () => {
+			const router = createRouter<{}>()
 
-			const app = router({ home, about })
-
-			// Routes are callable for URL generation
-			expect(app.home()).toBe('/')
-			expect(app.about()).toBe('/about')
+			expect(router.get('/a', () => text('ok')).method).toBe('GET')
+			expect(router.post('/a', () => text('ok')).method).toBe('POST')
+			expect(router.put('/a', () => text('ok')).method).toBe('PUT')
+			expect(router.patch('/a', () => text('ok')).method).toBe('PATCH')
+			expect(router.del('/a', () => text('ok')).method).toBe('DELETE')
+			expect(router.head('/a', () => text('ok')).method).toBe('HEAD')
+			expect(router.options('/a', () => text('ok')).method).toBe('OPTIONS')
+			expect(router.all('/a', () => text('ok')).method).toBe('*')
 		})
 
-		it('should generate URLs with params', () => {
-			const user = get('/users/:id', () => text('user'))
-			const postRoute = get('/users/:userId/posts/:postId', () => text('post'))
+		it('should preserve paths with params', () => {
+			const { get: typedGet } = createRouter<{}>()
 
-			const app = router({ user, post: postRoute })
-
-			expect(app.user({ id: 42 })).toBe('/users/42')
-			expect(app.post({ userId: 1, postId: 99 })).toBe('/users/1/posts/99')
+			const user = typedGet('/users/:id', ({ ctx }) => json({ id: ctx.params.id }))
+			expect(user.path).toBe('/users/:id')
 		})
 
-		it('should throw on missing URL params', () => {
-			const user = get('/users/:id', () => text('user'))
-			const app = router({ user })
+		it('should allow multiple params in path', () => {
+			const { get: typedGet } = createRouter<{}>()
 
-			expect(() => app.user({})).toThrow('Missing param: id')
-		})
-
-		it('should handle mixed static and param routes', () => {
-			const home = get('/', () => text('home'))
-			const user = get('/users/:id', () => text('user'))
-			const settings = get('/settings', () => text('settings'))
-
-			const app = router({ home, user, settings })
-
-			expect(app.home()).toBe('/')
-			expect(app.user({ id: 'abc' })).toBe('/users/abc')
-			expect(app.settings()).toBe('/settings')
+			const comment = typedGet('/posts/:postId/comments/:commentId', ({ ctx }) =>
+				json({ postId: ctx.params.postId, commentId: ctx.params.commentId })
+			)
+			expect(comment.path).toBe('/posts/:postId/comments/:commentId')
 		})
 	})
 
-	describe('prefix()', () => {
+	describe('handler args structure', () => {
+		it('should pass ctx and input to handlers', async () => {
+			const route = get('/test', ({ ctx, input }) => {
+				expect(ctx).toBeDefined()
+				expect(input).toBeUndefined()
+				return text('ok')
+			})
+
+			// Handler signature should accept { ctx, input }
+			expect(typeof route.handler).toBe('function')
+		})
+
+		it('should have ctx.params available', () => {
+			const route = get('/users/:id', ({ ctx }) => {
+				// ctx.params should be accessible
+				return json({ id: ctx.params.id })
+			})
+
+			expect(typeof route.handler).toBe('function')
+		})
+	})
+
+	describe('routes array', () => {
+		it('should create array of routes', () => {
+			const routes = [
+				get('/users', () => text('users')),
+				post('/users', () => text('create')),
+				get('/users/:id', () => text('user')),
+				put('/users/:id', () => text('update')),
+				del('/users/:id', () => text('delete')),
+			]
+
+			expect(routes).toHaveLength(5)
+			expect(routes[0].method).toBe('GET')
+			expect(routes[1].method).toBe('POST')
+			expect(routes[2].path).toBe('/users/:id')
+		})
+
+		it('should work with typed router', () => {
+			type App = { db: string }
+			const { get: typedGet, post: typedPost } = createRouter<App>()
+
+			const routeList = [
+				typedGet('/users', ({ ctx }) => json({ db: ctx.app.db })),
+				typedPost('/users', ({ ctx }) => json({ db: ctx.app.db })),
+			]
+
+			expect(routeList).toHaveLength(2)
+		})
+	})
+
+	describe('routes() helper', () => {
 		it('should prefix all routes', () => {
-			const users = get('/users', () => text('users'))
-			const posts = get('/posts', () => text('posts'))
+			const memberRoutes = routes('/members', [get('/', () => text('list')), get('/:id', () => text('show'))])
 
-			const prefixed = prefix('/api', { users, posts })
+			expect(memberRoutes).toHaveLength(2)
+			expect(memberRoutes[0].path).toBe('/members/')
+			expect(memberRoutes[1].path).toBe('/members/:id')
+		})
 
-			expect(prefixed.users.path).toBe('/api/users')
-			expect(prefixed.posts.path).toBe('/api/posts')
+		it('should handle nested routes', () => {
+			const adminRoutes = routes('/admin', [
+				get('/dashboard', () => text('dashboard')),
+				...routes('/users', [get('/', () => text('list')), get('/:id', () => text('show'))]),
+			])
+
+			expect(adminRoutes).toHaveLength(3)
+			expect(adminRoutes[0].path).toBe('/admin/dashboard')
+			expect(adminRoutes[1].path).toBe('/admin/users/')
+			expect(adminRoutes[2].path).toBe('/admin/users/:id')
 		})
 
 		it('should preserve route methods', () => {
-			const read = get('/data', () => text('read'))
-			const write = post('/data', () => text('write'))
+			const prefixed = routes('/api', [
+				get('/read', () => text('get')),
+				post('/create', () => text('post')),
+				put('/update', () => text('put')),
+				del('/delete', () => text('delete')),
+			])
 
-			const prefixed = prefix('/v1', { read, write })
+			expect(prefixed[0].method).toBe('GET')
+			expect(prefixed[1].method).toBe('POST')
+			expect(prefixed[2].method).toBe('PUT')
+			expect(prefixed[3].method).toBe('DELETE')
+		})
 
-			expect(prefixed.read.method).toBe('GET')
-			expect(prefixed.write.method).toBe('POST')
+		it('should work with typed routes', () => {
+			type App = { db: string }
+			const { get: typedGet, routes: typedRoutes } = createRouter<App>()
+
+			const memberRoutes = typedRoutes('/members', [
+				typedGet('/', ({ ctx }) => json({ db: ctx.app.db })),
+				typedGet('/:id', ({ ctx }) => json({ id: ctx.params.id, db: ctx.app.db })),
+			])
+
+			expect(memberRoutes).toHaveLength(2)
+			expect(memberRoutes[0].path).toBe('/members/')
+			expect(memberRoutes[1].path).toBe('/members/:id')
+		})
+
+		it('should handle empty prefix', () => {
+			const prefixed = routes('', [get('/users', () => text('users'))])
+
+			expect(prefixed[0].path).toBe('/users')
+		})
+
+		it('should handle empty routes array', () => {
+			const empty = routes('/api', [])
+			expect(empty).toHaveLength(0)
 		})
 	})
 
-	describe('merge()', () => {
-		it('should merge multiple route objects', () => {
-			const userRoutes = {
-				listUsers: get('/users', () => text('list')),
-				getUser: get('/users/:id', () => text('get')),
-			}
+	describe('App generic on simple functions', () => {
+		it('should accept App type on get()', () => {
+			type App = { db: string }
+			const route = get<App>('/users', ({ ctx }) => json({ db: ctx.app.db }))
 
-			const postRoutes = {
-				listPosts: get('/posts', () => text('list')),
-				getPost: get('/posts/:id', () => text('get')),
-			}
-
-			const merged = merge(userRoutes, postRoutes)
-
-			expect(merged.listUsers).toBe(userRoutes.listUsers)
-			expect(merged.getUser).toBe(userRoutes.getUser)
-			expect(merged.listPosts).toBe(postRoutes.listPosts)
-			expect(merged.getPost).toBe(postRoutes.getPost)
+			expect(route.method).toBe('GET')
+			expect(route.path).toBe('/users')
 		})
 
-		it('should handle empty merge', () => {
-			const merged = merge({}, {})
-			expect(Object.keys(merged)).toHaveLength(0)
+		it('should accept App type on all route methods', () => {
+			type App = { db: string }
+
+			const routes = [
+				get<App>('/a', ({ ctx }) => json({ db: ctx.app.db })),
+				post<App>('/a', ({ ctx }) => json({ db: ctx.app.db })),
+				put<App>('/a', ({ ctx }) => json({ db: ctx.app.db })),
+				patch<App>('/a', ({ ctx }) => json({ db: ctx.app.db })),
+				del<App>('/a', ({ ctx }) => json({ db: ctx.app.db })),
+				head<App>('/a', ({ ctx }) => json({ db: ctx.app.db })),
+				options<App>('/a', ({ ctx }) => json({ db: ctx.app.db })),
+				all<App>('/a', ({ ctx }) => json({ db: ctx.app.db })),
+			]
+
+			expect(routes).toHaveLength(8)
+		})
+
+		it('should default to empty App when not specified', () => {
+			// No <App> specified - should still work
+			const route = get('/users', () => text('ok'))
+
+			expect(route.method).toBe('GET')
+			expect(route.path).toBe('/users')
 		})
 	})
 })

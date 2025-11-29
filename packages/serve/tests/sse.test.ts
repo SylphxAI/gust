@@ -4,7 +4,23 @@
 
 import { describe, expect, it } from 'bun:test'
 import { EventEmitter } from 'node:events'
-import { createSSE, formatSSE, SSEClient, sseHeaders } from '../src/sse'
+import {
+	// Legacy API
+	createSSE,
+	// Formatters
+	formatSSE,
+	formatSSEEvent,
+	isNativeSSEAvailable,
+	nativeSSE,
+	SSEClient,
+	// Unified API
+	sse,
+	sseEvent,
+	sseHeaders,
+	sseRaw,
+	sseStream,
+	textStream,
+} from '../src/sse'
 
 // Mock socket for testing
 class MockSocket extends EventEmitter {
@@ -450,6 +466,556 @@ describe('Server-Sent Events', () => {
 
 			const duration = performance.now() - start
 			expect(duration).toBeLessThan(1000)
+		})
+	})
+
+	describe('formatSSEEvent', () => {
+		it('should format simple event', () => {
+			const result = formatSSEEvent({ data: 'hello' })
+			expect(result).toBe('data: hello\n\n')
+		})
+
+		it('should format event with id', () => {
+			const result = formatSSEEvent({ data: 'test', id: 123 })
+			expect(result).toContain('id: 123\n')
+			expect(result).toContain('data: test\n')
+		})
+
+		it('should format event with string id', () => {
+			const result = formatSSEEvent({ data: 'test', id: 'abc' })
+			expect(result).toContain('id: abc\n')
+		})
+
+		it('should format event with event type', () => {
+			const result = formatSSEEvent({ data: 'test', event: 'update' })
+			expect(result).toContain('event: update\n')
+		})
+
+		it('should format event with retry', () => {
+			const result = formatSSEEvent({ data: 'test', retry: 3000 })
+			expect(result).toContain('retry: 3000\n')
+		})
+
+		it('should handle object data', () => {
+			const result = formatSSEEvent({ data: { key: 'value' } })
+			expect(result).toContain('data: {"key":"value"}\n')
+		})
+
+		it('should handle multiline string data', () => {
+			const result = formatSSEEvent({ data: 'line1\nline2' })
+			expect(result).toContain('data: line1\n')
+			expect(result).toContain('data: line2\n')
+		})
+
+		it('should handle all fields together', () => {
+			const result = formatSSEEvent({
+				data: { msg: 'hello' },
+				id: 42,
+				event: 'message',
+				retry: 5000,
+			})
+			expect(result).toContain('id: 42\n')
+			expect(result).toContain('event: message\n')
+			expect(result).toContain('retry: 5000\n')
+			expect(result).toContain('data: {"msg":"hello"}\n')
+			expect(result.endsWith('\n\n')).toBe(true)
+		})
+	})
+
+	describe('sseEvent', () => {
+		it('should create simple event', () => {
+			const result = sseEvent('hello')
+			expect(result).toBe('data: hello\n\n')
+		})
+
+		it('should create event with id', () => {
+			const result = sseEvent('hello', 1)
+			expect(result).toContain('id: 1\n')
+			expect(result).toContain('data: hello\n')
+		})
+
+		it('should handle object data', () => {
+			const result = sseEvent({ msg: 'test' })
+			expect(result).toContain('data: {"msg":"test"}\n')
+		})
+
+		it('should handle string id', () => {
+			const result = sseEvent('test', 'event-123')
+			expect(result).toContain('id: event-123\n')
+		})
+	})
+
+	describe('textStream', () => {
+		it('should convert string generator to Uint8Array', async () => {
+			async function* generate() {
+				yield 'hello'
+				yield 'world'
+			}
+
+			const chunks: Uint8Array[] = []
+			for await (const chunk of textStream(generate)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBe(2)
+			expect(new TextDecoder().decode(chunks[0])).toBe('hello')
+			expect(new TextDecoder().decode(chunks[1])).toBe('world')
+		})
+
+		it('should handle async iterable source', async () => {
+			const source = {
+				async *[Symbol.asyncIterator]() {
+					yield 'a'
+					yield 'b'
+				},
+			}
+
+			const chunks: Uint8Array[] = []
+			for await (const chunk of textStream(source)) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBe(2)
+		})
+
+		it('should handle unicode', async () => {
+			async function* generate() {
+				yield '你好'
+				yield '🌍'
+			}
+
+			const chunks: Uint8Array[] = []
+			for await (const chunk of textStream(generate)) {
+				chunks.push(chunk)
+			}
+
+			expect(new TextDecoder().decode(chunks[0])).toBe('你好')
+			expect(new TextDecoder().decode(chunks[1])).toBe('🌍')
+		})
+	})
+
+	describe('sseRaw response helper', () => {
+		it('should create SSE response with correct headers', () => {
+			async function* generate(): AsyncGenerator<Uint8Array> {
+				yield new TextEncoder().encode('data: test\n\n')
+			}
+
+			const response = sseRaw(generate())
+
+			expect(response.status).toBe(200)
+			expect(response.headers['content-type']).toBe('text/event-stream')
+			expect(response.headers['cache-control']).toBe('no-cache')
+			expect(response.headers['connection']).toBe('keep-alive')
+			expect(response.headers['x-accel-buffering']).toBe('no')
+		})
+
+		it('should allow custom status', () => {
+			async function* generate(): AsyncGenerator<Uint8Array> {
+				yield new TextEncoder().encode('data: test\n\n')
+			}
+
+			const response = sseRaw(generate(), { status: 201 })
+			expect(response.status).toBe(201)
+		})
+
+		it('should allow custom headers', () => {
+			async function* generate(): AsyncGenerator<Uint8Array> {
+				yield new TextEncoder().encode('data: test\n\n')
+			}
+
+			const response = sseRaw(generate(), {
+				headers: { 'x-custom': 'value' },
+			})
+			expect(response.headers['x-custom']).toBe('value')
+		})
+
+		it('should accept function source', () => {
+			const response = sseRaw(async function* () {
+				yield new TextEncoder().encode('data: test\n\n')
+			})
+
+			expect(response.status).toBe(200)
+		})
+	})
+
+	describe('sseStream response helper', () => {
+		it('should create SSE response from event generator', async () => {
+			async function* generate() {
+				yield { data: 'hello' }
+				yield { data: 'world', id: 1 }
+			}
+
+			const response = sseStream(generate())
+
+			expect(response.status).toBe(200)
+			expect(response.headers['content-type']).toBe('text/event-stream')
+
+			// Consume the body to verify it works
+			const chunks: Uint8Array[] = []
+			for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+				chunks.push(chunk)
+			}
+
+			const output = chunks.map((c) => new TextDecoder().decode(c)).join('')
+			expect(output).toContain('data: hello\n')
+			expect(output).toContain('data: world\n')
+			expect(output).toContain('id: 1\n')
+		})
+
+		it('should handle object data in events', async () => {
+			async function* generate() {
+				yield { data: { count: 1 }, event: 'update' }
+			}
+
+			const response = sseStream(generate())
+			const chunks: Uint8Array[] = []
+			for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+				chunks.push(chunk)
+			}
+
+			const output = chunks.map((c) => new TextDecoder().decode(c)).join('')
+			expect(output).toContain('event: update\n')
+			expect(output).toContain('data: {"count":1}\n')
+		})
+
+		it('should accept function source', async () => {
+			const response = sseStream(async function* () {
+				yield { data: 'test' }
+			})
+
+			const chunks: Uint8Array[] = []
+			for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+				chunks.push(chunk)
+			}
+
+			expect(chunks.length).toBeGreaterThan(0)
+		})
+	})
+
+	describe('nativeSSE', () => {
+		// Mock GustServer for testing
+		class MockGustServer {
+			private writers = new Map<number, string[]>()
+			private closedWriters = new Map<number, string[]>() // Keep data after close
+			private nextId = 1
+
+			createSseWriter(): number {
+				const id = this.nextId++
+				this.writers.set(id, [])
+				return id
+			}
+
+			async sendSse(writerId: number, data: string): Promise<boolean> {
+				const writer = this.writers.get(writerId)
+				if (!writer) return false
+				writer.push(data)
+				return true
+			}
+
+			async sendSseEvent(writerId: number, data: string, id?: string, event?: string): Promise<boolean> {
+				const writer = this.writers.get(writerId)
+				if (!writer) return false
+				let msg = ''
+				if (id !== undefined) msg += `id: ${id}\n`
+				if (event !== undefined) msg += `event: ${event}\n`
+				msg += `data: ${data}\n\n`
+				writer.push(msg)
+				return true
+			}
+
+			closeSse(writerId: number): void {
+				const data = this.writers.get(writerId)
+				if (data) {
+					this.closedWriters.set(writerId, [...data])
+				}
+				this.writers.delete(writerId)
+			}
+
+			getWriterData(writerId: number): string[] | undefined {
+				// Check closed writers first (for tests that inspect after handler completes)
+				return this.closedWriters.get(writerId) ?? this.writers.get(writerId)
+			}
+
+			isWriterClosed(writerId: number): boolean {
+				return this.closedWriters.has(writerId) && !this.writers.has(writerId)
+			}
+		}
+
+		it('should create SSE response with writer ID', () => {
+			const server = new MockGustServer()
+
+			const response = nativeSSE(server, async () => {
+				// Handler does nothing for this test
+			})
+
+			expect(response.status).toBe(200)
+			expect(response.headers['content-type']).toBe('text/event-stream')
+			expect(response.sseWriterId).toBe(1)
+			expect(response.body).toBe('')
+		})
+
+		it('should pass writer to handler', async () => {
+			const server = new MockGustServer()
+			let writerReceived = false
+			let writerId = 0
+
+			nativeSSE(server, async (writer) => {
+				writerReceived = true
+				writerId = writer.id
+			})
+
+			// Wait for async handler to execute
+			await new Promise((r) => setTimeout(r, 10))
+
+			expect(writerReceived).toBe(true)
+			expect(writerId).toBe(1)
+		})
+
+		it('should allow sending events through writer', async () => {
+			const server = new MockGustServer()
+
+			const response = nativeSSE(server, async (writer) => {
+				await writer.sendEvent('hello', '1', 'message')
+				await writer.sendEvent('world', '2')
+			})
+
+			// Wait for async handler
+			await new Promise((r) => setTimeout(r, 10))
+
+			const data = server.getWriterData(response.sseWriterId)
+			expect(data).toBeDefined()
+			expect(data!.length).toBe(2)
+			expect(data![0]).toContain('id: 1')
+			expect(data![0]).toContain('event: message')
+			expect(data![0]).toContain('data: hello')
+		})
+
+		it('should allow sending raw data', async () => {
+			const server = new MockGustServer()
+
+			const response = nativeSSE(server, async (writer) => {
+				await writer.send('raw data')
+			})
+
+			await new Promise((r) => setTimeout(r, 10))
+
+			const data = server.getWriterData(response.sseWriterId)
+			expect(data).toBeDefined()
+			expect(data![0]).toBe('raw data')
+		})
+
+		it('should close writer when handler completes', async () => {
+			const server = new MockGustServer()
+
+			const response = nativeSSE(server, async () => {
+				// Handler completes immediately
+			})
+
+			await new Promise((r) => setTimeout(r, 10))
+
+			// Writer should be closed
+			expect(server.isWriterClosed(response.sseWriterId)).toBe(true)
+		})
+
+		it('should close writer on handler error', async () => {
+			const server = new MockGustServer()
+			const consoleSpy = { error: console.error }
+			console.error = () => {} // Suppress error output
+
+			const response = nativeSSE(server, async () => {
+				throw new Error('Test error')
+			})
+
+			await new Promise((r) => setTimeout(r, 10))
+
+			// Writer should be closed even on error
+			expect(server.isWriterClosed(response.sseWriterId)).toBe(true)
+
+			console.error = consoleSpy.error
+		})
+
+		it('should allow custom status and headers', () => {
+			const server = new MockGustServer()
+
+			const response = nativeSSE(server, async () => {}, {
+				status: 201,
+				headers: { 'x-custom': 'value' },
+			})
+
+			expect(response.status).toBe(201)
+			expect(response.headers['x-custom']).toBe('value')
+			expect(response.headers['content-type']).toBe('text/event-stream')
+		})
+
+		it('should increment writer IDs', () => {
+			const server = new MockGustServer()
+
+			const r1 = nativeSSE(server, async () => {})
+			const r2 = nativeSSE(server, async () => {})
+			const r3 = nativeSSE(server, async () => {})
+
+			expect(r1.sseWriterId).toBe(1)
+			expect(r2.sseWriterId).toBe(2)
+			expect(r3.sseWriterId).toBe(3)
+		})
+	})
+
+	describe('isNativeSSEAvailable', () => {
+		it('should return true', () => {
+			// After refactor, nativeSSE always works when server is provided
+			expect(isNativeSSEAvailable()).toBe(true)
+		})
+	})
+
+	// =========================================================================
+	// Unified sse() API Tests
+	// =========================================================================
+
+	describe('sse() unified API', () => {
+		describe('generator mode (pull-based)', () => {
+			it('should create SSE response from generator', async () => {
+				const response = sse(async function* () {
+					yield { data: 'hello' }
+					yield { data: 'world' }
+				})
+
+				expect(response.status).toBe(200)
+				expect(response.headers['content-type']).toBe('text/event-stream')
+				expect(response.headers['cache-control']).toBe('no-cache')
+
+				// Consume body
+				const chunks: Uint8Array[] = []
+				for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+					chunks.push(chunk)
+				}
+
+				const output = chunks.map((c) => new TextDecoder().decode(c)).join('')
+				expect(output).toContain('data: hello\n')
+				expect(output).toContain('data: world\n')
+			})
+
+			it('should handle events with all fields', async () => {
+				const response = sse(async function* () {
+					yield { data: { count: 1 }, id: '1', event: 'update', retry: 3000 }
+				})
+
+				const chunks: Uint8Array[] = []
+				for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+					chunks.push(chunk)
+				}
+
+				const output = chunks.map((c) => new TextDecoder().decode(c)).join('')
+				expect(output).toContain('id: 1\n')
+				expect(output).toContain('event: update\n')
+				expect(output).toContain('retry: 3000\n')
+				expect(output).toContain('data: {"count":1}\n')
+			})
+
+			it('should allow custom status and headers', () => {
+				const response = sse(
+					async function* () {
+						yield { data: 'test' }
+					},
+					{ status: 201, headers: { 'x-custom': 'value' } }
+				)
+
+				expect(response.status).toBe(201)
+				expect(response.headers['x-custom']).toBe('value')
+			})
+		})
+
+		describe('handler mode (push-based)', () => {
+			it('should create SSE response from handler', async () => {
+				const response = sse(async (emit) => {
+					emit({ data: 'hello' })
+					emit({ data: 'world' })
+				})
+
+				expect(response.status).toBe(200)
+				expect(response.headers['content-type']).toBe('text/event-stream')
+
+				// Consume body
+				const chunks: Uint8Array[] = []
+				for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+					chunks.push(chunk)
+					if (chunks.length >= 2) break // Handler emits 2 events
+				}
+
+				const output = chunks.map((c) => new TextDecoder().decode(c)).join('')
+				expect(output).toContain('data: hello\n')
+				expect(output).toContain('data: world\n')
+			})
+
+			it('should handle async emissions', async () => {
+				const response = sse(async (emit) => {
+					emit({ data: 'first' })
+					await new Promise((r) => setTimeout(r, 10))
+					emit({ data: 'second' })
+				})
+
+				const chunks: Uint8Array[] = []
+				for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+					chunks.push(chunk)
+					if (chunks.length >= 2) break
+				}
+
+				expect(chunks.length).toBe(2)
+			})
+
+			it('should call cleanup on iterator close', async () => {
+				let cleanupCalled = false
+
+				const response = sse(async (emit) => {
+					emit({ data: 'test' })
+					return () => {
+						cleanupCalled = true
+					}
+				})
+
+				// Start consuming but break early
+				for await (const _ of response.body as AsyncIterable<Uint8Array>) {
+					break
+				}
+
+				// Wait for cleanup
+				await new Promise((r) => setTimeout(r, 20))
+				expect(cleanupCalled).toBe(true)
+			})
+
+			it('should handle events with all fields', async () => {
+				const response = sse(async (emit) => {
+					emit({ data: { msg: 'test' }, id: 42, event: 'message' })
+				})
+
+				const chunks: Uint8Array[] = []
+				for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+					chunks.push(chunk)
+					if (chunks.length >= 1) break
+				}
+
+				const output = chunks.map((c) => new TextDecoder().decode(c)).join('')
+				expect(output).toContain('id: 42\n')
+				expect(output).toContain('event: message\n')
+				expect(output).toContain('data: {"msg":"test"}\n')
+			})
+		})
+
+		describe('auto-detection', () => {
+			it('should detect generator (0 params)', () => {
+				// Generator functions have length 0
+				const gen = async function* () {
+					yield { data: 'test' }
+				}
+				expect(gen.length).toBe(0)
+			})
+
+			it('should detect handler (1+ params)', () => {
+				// Handler functions have length >= 1
+				const handler = async (emit: (e: unknown) => void) => {
+					emit({ data: 'test' })
+				}
+				expect(handler.length).toBe(1)
+			})
 		})
 	})
 })
