@@ -93,7 +93,24 @@ export type ContextProvider<App> = (raw: RawContext) => App | Promise<App>
  * })
  * ```
  */
-export type Middleware = <App>(handler: Handler<Context<App>>) => Handler<Context<App>>
+/**
+ * Middleware with bounded polymorphism
+ *
+ * - `Middleware` = `Middleware<unknown>` = universal, works with any App
+ * - `Middleware<R>` = bounded, requires App extends R
+ *
+ * @example
+ * ```typescript
+ * // Universal middleware - no App requirements
+ * const cors = (): Middleware => ...
+ *
+ * // Bounded middleware - requires App with userId
+ * const rateLimit = <App extends { userId: string }>(): Middleware<App> => ...
+ * ```
+ */
+export type Middleware<RequiredApp = unknown> = <App extends RequiredApp>(
+	handler: Handler<Context<App>>
+) => Handler<Context<App>>
 
 /**
  * Serve options
@@ -103,8 +120,9 @@ export type ServeOptions<App = Record<string, never>> = {
 	readonly hostname?: string
 	/** Routes created with get(), post(), etc. */
 	readonly routes: Route<string, string, App>[]
-	/** Global middleware - wraps the entire router */
-	readonly middleware?: Middleware
+	/** Global middleware - wraps the entire router
+	 * Use Middleware (universal) or Middleware<App> (bounded) */
+	readonly middleware?: Middleware<Partial<App>>
 	/** Context provider - creates app context for each request */
 	readonly context?: ContextProvider<App>
 	readonly onListen?: (info: { port: number; hostname: string; tls: boolean }) => void
@@ -136,10 +154,7 @@ export type Server = {
 /**
  * Create handler from routes and optional context provider
  */
-const createHandler = <App>(
-	routes: Route<string, string, App>[],
-	contextProvider?: ContextProvider<App>
-): Handler<Context<App>> => {
+const createHandler = <App>(routes: Route<string, string, App>[]): Handler<Context<App>> => {
 	type WasmRouterType = {
 		insert: (m: string, p: string, id: number) => void
 		find: (
@@ -211,7 +226,7 @@ const createEntryHandler = <App>(
 	contextProvider?: ContextProvider<App>,
 	middleware?: Middleware
 ): Handler<RawContext> => {
-	const routerHandler = createHandler(routes, contextProvider)
+	const routerHandler = createHandler(routes)
 
 	// Wrap with middleware if provided
 	const finalHandler = middleware ? middleware<App>(routerHandler) : routerHandler
