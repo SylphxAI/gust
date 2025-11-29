@@ -3,8 +3,9 @@
  * Helmet-style security headers
  */
 
-import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import type { BaseContext } from './context'
+import type { Handler, ServerResponse } from '@sylphx/gust-core'
+import type { Context } from './context'
+import type { Middleware } from './serve'
 
 export type SecurityOptions = {
 	/** Content Security Policy */
@@ -40,13 +41,20 @@ export type SecurityOptions = {
 const DEFAULT_CSP = "default-src 'self'"
 
 /**
- * Create security headers wrapper
+ * Create security headers middleware
  *
- * Works as both global middleware (BaseContext) and route middleware (Context)
+ * Adds security headers to responses (Helmet-style).
+ * Works as both global middleware and route-level middleware.
+ *
+ * @example
+ * ```typescript
+ * serve({
+ *   middleware: security(),
+ *   routes: [...]
+ * })
+ * ```
  */
-export const security = <Ctx extends BaseContext = BaseContext>(
-	options: SecurityOptions = {}
-): Wrapper<Ctx> => {
+export const security = (options: SecurityOptions = {}): Middleware => {
 	const headers: Record<string, string> = {}
 
 	// Content-Security-Policy
@@ -113,8 +121,8 @@ export const security = <Ctx extends BaseContext = BaseContext>(
 		headers['x-xss-protection'] = '0' // Recommended to disable as it can cause vulnerabilities
 	}
 
-	return (handler: Handler<Ctx>): Handler<Ctx> => {
-		return async (ctx: Ctx): Promise<ServerResponse> => {
+	return <App>(handler: Handler<Context<App>>): Handler<Context<App>> =>
+		async (ctx: Context<App>): Promise<ServerResponse> => {
 			const res = await handler(ctx)
 
 			return {
@@ -125,14 +133,13 @@ export const security = <Ctx extends BaseContext = BaseContext>(
 				},
 			}
 		}
-	}
 }
 
 /**
  * Pre-configured security for strict mode
  */
-export const strictSecurity = <Ctx extends BaseContext = BaseContext>(): Wrapper<Ctx> =>
-	security<Ctx>({
+export const strictSecurity = (): Middleware =>
+	security({
 		contentSecurityPolicy:
 			"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; frame-ancestors 'none'",
 		crossOriginEmbedderPolicy: 'require-corp',
@@ -146,8 +153,8 @@ export const strictSecurity = <Ctx extends BaseContext = BaseContext>(): Wrapper
 /**
  * Pre-configured security for API servers
  */
-export const apiSecurity = <Ctx extends BaseContext = BaseContext>(): Wrapper<Ctx> =>
-	security<Ctx>({
+export const apiSecurity = (): Middleware =>
+	security({
 		contentSecurityPolicy: false, // APIs don't need CSP
 		crossOriginEmbedderPolicy: false,
 		crossOriginOpenerPolicy: false,

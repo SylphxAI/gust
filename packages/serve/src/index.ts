@@ -112,9 +112,9 @@ export {
 export type { CompressionOptions } from './compress'
 // Compression
 export { brotli, compress, gzip } from './compress'
-export type { BaseContext, Context, HandlerArgs, RouteHandler } from './context'
+export type { BaseContext, Context, HandlerArgs, RawContext, RouteHandler } from './context'
 // Context
-export { createContext, parseHeaders, withParams } from './context'
+export { createContext, createRawContext, parseHeaders, withApp, withParams } from './context'
 export type { Cookie, CookieOptions } from './cookie'
 // Cookies
 export {

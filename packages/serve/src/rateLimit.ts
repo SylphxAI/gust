@@ -3,21 +3,22 @@
  * Token bucket and sliding window rate limiters
  */
 
-import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
+import type { Handler, ServerResponse } from '@sylphx/gust-core'
 import { json } from '@sylphx/gust-core'
-import type { BaseContext } from './context'
+import type { Context } from './context'
+import type { Middleware } from './serve'
 
-export type RateLimitOptions<Ctx extends BaseContext = BaseContext> = {
+export type RateLimitOptions = {
 	/** Maximum requests per window */
 	readonly max: number
 	/** Window size in milliseconds */
 	readonly windowMs: number
 	/** Key generator (default: IP address) */
-	readonly keyGenerator?: (ctx: Ctx) => string
+	readonly keyGenerator?: (ctx: Context<unknown>) => string
 	/** Skip rate limiting for certain requests */
-	readonly skip?: (ctx: Ctx) => boolean
+	readonly skip?: (ctx: Context<unknown>) => boolean
 	/** Custom response when rate limited */
-	readonly onLimitReached?: (ctx: Ctx) => ServerResponse
+	readonly onLimitReached?: (ctx: Context<unknown>) => ServerResponse
 	/** Include rate limit headers in response */
 	readonly headers?: boolean
 	/** Use sliding window (more accurate but uses more memory) */
@@ -76,7 +77,7 @@ class RateLimitStore {
 /**
  * Get client IP from context
  */
-const getClientIp = <Ctx extends BaseContext>(ctx: Ctx): string => {
+const getClientIp = (ctx: Context<unknown>): string => {
 	// Try X-Forwarded-For first (for proxies)
 	const forwarded = ctx.headers['x-forwarded-for']
 	if (forwarded) {
@@ -166,17 +167,24 @@ const slidingWindowCheck = (
 }
 
 /**
- * Create rate limiting wrapper
+ * Create rate limiting middleware
  *
- * Works as both global middleware (BaseContext) and route middleware (Context)
+ * Limits requests based on IP address or custom key.
+ * Works as both global middleware and route-level middleware.
+ *
+ * @example
+ * ```typescript
+ * serve({
+ *   middleware: rateLimit({ max: 100, windowMs: 60000 }),
+ *   routes: [...]
+ * })
+ * ```
  */
-export const rateLimit = <Ctx extends BaseContext = BaseContext>(
-	options: RateLimitOptions<Ctx>
-): Wrapper<Ctx> => {
+export const rateLimit = (options: RateLimitOptions): Middleware => {
 	const {
 		max,
 		windowMs,
-		keyGenerator = getClientIp<Ctx>,
+		keyGenerator = getClientIp,
 		skip,
 		onLimitReached,
 		headers = true,
@@ -185,14 +193,14 @@ export const rateLimit = <Ctx extends BaseContext = BaseContext>(
 
 	const store = new RateLimitStore(windowMs)
 
-	return (handler: Handler<Ctx>): Handler<Ctx> => {
-		return async (ctx: Ctx): Promise<ServerResponse> => {
+	return <App>(handler: Handler<Context<App>>): Handler<Context<App>> =>
+		async (ctx: Context<App>): Promise<ServerResponse> => {
 			// Check if should skip
-			if (skip?.(ctx)) {
+			if (skip?.(ctx as Context<unknown>)) {
 				return handler(ctx)
 			}
 
-			const key = keyGenerator(ctx)
+			const key = keyGenerator(ctx as Context<unknown>)
 			const check = slidingWindow
 				? slidingWindowCheck(store, key, max, windowMs)
 				: fixedWindowCheck(store, key, max, windowMs)
@@ -200,7 +208,7 @@ export const rateLimit = <Ctx extends BaseContext = BaseContext>(
 			if (!check.allowed) {
 				// Rate limited
 				const limitedResponse = onLimitReached
-					? onLimitReached(ctx)
+					? onLimitReached(ctx as Context<unknown>)
 					: json({ error: 'Too Many Requests' }, { status: 429 })
 
 				if (headers) {
@@ -236,7 +244,6 @@ export const rateLimit = <Ctx extends BaseContext = BaseContext>(
 
 			return res
 		}
-	}
 }
 
 /**
@@ -247,32 +254,32 @@ export type RateLimitStore2 = {
 	get(key: string): Promise<{ count: number; resetTime: number } | null>
 }
 
-export const rateLimitWithStore = <Ctx extends BaseContext = BaseContext>(
-	options: Omit<RateLimitOptions<Ctx>, 'slidingWindow'> & { store: RateLimitStore2 }
-): Wrapper<Ctx> => {
+export const rateLimitWithStore = (
+	options: Omit<RateLimitOptions, 'slidingWindow'> & { store: RateLimitStore2 }
+): Middleware => {
 	const {
 		max,
 		windowMs,
-		keyGenerator = getClientIp<Ctx>,
+		keyGenerator = getClientIp,
 		skip,
 		onLimitReached,
 		headers = true,
 		store,
 	} = options
 
-	return (handler: Handler<Ctx>): Handler<Ctx> => {
-		return async (ctx: Ctx): Promise<ServerResponse> => {
-			if (skip?.(ctx)) {
+	return <App>(handler: Handler<Context<App>>): Handler<Context<App>> =>
+		async (ctx: Context<App>): Promise<ServerResponse> => {
+			if (skip?.(ctx as Context<unknown>)) {
 				return handler(ctx)
 			}
 
-			const key = keyGenerator(ctx)
+			const key = keyGenerator(ctx as Context<unknown>)
 			const { count, resetTime } = await store.increment(key, windowMs)
 			const remaining = Math.max(0, max - count)
 
 			if (count > max) {
 				const limitedResponse = onLimitReached
-					? onLimitReached(ctx)
+					? onLimitReached(ctx as Context<unknown>)
 					: json({ error: 'Too Many Requests' }, { status: 429 })
 
 				if (headers) {
@@ -307,5 +314,4 @@ export const rateLimitWithStore = <Ctx extends BaseContext = BaseContext>(
 
 			return res
 		}
-	}
 }

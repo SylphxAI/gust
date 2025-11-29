@@ -1,10 +1,8 @@
 /**
- * Request Context - immutable request wrapper
- * Provides convenient access to request data
+ * Request Context
  *
- * Two-layer design:
- * - BaseContext: HTTP request data (library-provided)
- * - Context<App>: BaseContext + user's app context
+ * Single unified context type with app always present.
+ * Middleware is polymorphic over App type.
  */
 
 import type { Socket } from 'node:net'
@@ -12,14 +10,24 @@ import type { ParseResult } from '@sylphx/gust-core'
 import { type MethodCode, MethodNames } from '@sylphx/gust-core'
 
 // =============================================================================
-// Base Context (library-provided HTTP request data)
+// Context Type
 // =============================================================================
 
 /**
- * Base context with HTTP request data
- * These fields are provided by the library and won't collide with user context
+ * Request context with HTTP data and user's app context
+ *
+ * @example
+ * ```typescript
+ * type App = { db: Database; user: User }
+ *
+ * get<App>('/users', ({ ctx }) => {
+ *   ctx.method      // HTTP request data
+ *   ctx.app.db      // User's app context
+ *   ctx.app.user    // Per-request context
+ * })
+ * ```
  */
-export type BaseContext = {
+export type Context<App = Record<string, never>> = {
 	readonly method: string
 	readonly path: string
 	readonly query: string
@@ -29,27 +37,6 @@ export type BaseContext = {
 	readonly json: <T>() => T
 	readonly raw: Buffer
 	readonly socket: Socket
-}
-
-// =============================================================================
-// Full Context (BaseContext + user's App context)
-// =============================================================================
-
-/**
- * Full context with user's app context namespaced under 'app'
- *
- * @example
- * ```typescript
- * type AppContext = { db: Database; user: User }
- *
- * get<AppContext>('/users', ({ ctx }) => {
- *   ctx.method      // Library (HTTP request)
- *   ctx.app.db      // User (static)
- *   ctx.app.user    // User (per-request)
- * })
- * ```
- */
-export type Context<App = Record<string, never>> = BaseContext & {
 	readonly app: App
 }
 
@@ -75,26 +62,30 @@ export type RouteHandler<App = Record<string, never>, Input = void> = (
 	| Promise<import('@sylphx/gust-core').ServerResponse>
 
 // =============================================================================
-// Legacy Context (for backward compatibility)
+// Internal Types (for parsing)
 // =============================================================================
 
 /**
- * Legacy context type (deprecated, use Context<App> instead)
- * @deprecated Use Context<App> for new code
+ * Raw parsed context (internal - before app is added)
+ * @internal
  */
-export type LegacyContext = BaseContext
+export type RawContext = Omit<Context<never>, 'app'>
+
+// =============================================================================
+// Context Creation
+// =============================================================================
 
 /**
- * Create context from parsed request
- * Returns BaseContext (without app) - app is added by serve()
+ * Create raw context from parsed request
+ * Returns RawContext (without app) - app is added by serve()
  */
-export const createContext = (
+export const createRawContext = (
 	socket: Socket,
 	raw: Buffer,
 	parsed: ParseResult,
 	headers: Record<string, string>,
 	params: Record<string, string> = {}
-): BaseContext => {
+): RawContext => {
 	const decoder = new TextDecoder()
 
 	const method = MethodNames[parsed.method as MethodCode] || 'UNKNOWN'
@@ -118,15 +109,25 @@ export const createContext = (
 }
 
 /**
- * Create context with updated params (for router)
+ * Add app context to raw context
+ * @internal
  */
-export const withParams = <T extends BaseContext>(ctx: T, params: Record<string, string>): T => ({
-	...ctx,
-	params: { ...ctx.params, ...params },
-})
+export const withApp = <App>(raw: RawContext, app: App): Context<App> =>
+	({ ...raw, app }) as Context<App>
+
+/**
+ * Create context with updated params
+ * @internal
+ */
+export const withParams = <App>(ctx: Context<App>, params: Record<string, string>): Context<App> =>
+	({
+		...ctx,
+		params: { ...ctx.params, ...params },
+	}) as Context<App>
 
 /**
  * Parse headers from raw buffer using WASM offsets
+ * @internal
  */
 export const parseHeaders = (
 	raw: Buffer,
@@ -149,3 +150,19 @@ export const parseHeaders = (
 
 	return headers
 }
+
+// =============================================================================
+// Legacy Compatibility
+// =============================================================================
+
+/**
+ * BaseContext - alias for Context with empty app
+ * @deprecated Use Context<App> directly
+ */
+export type BaseContext = Context<Record<string, never>>
+
+/**
+ * Legacy alias for createRawContext
+ * @deprecated Use createRawContext instead
+ */
+export const createContext = createRawContext

@@ -16,8 +16,8 @@ import { createServer, type Server as NetServer, type Socket } from 'node:net'
 import { createServer as createTlsServer, type TLSSocket, type Server as TlsServer } from 'node:tls'
 import type { Handler, ServerResponse, WasmCore } from '@sylphx/gust-core'
 import { getWasm, initWasm, isStreamingBody, serverError } from '@sylphx/gust-core'
-import type { BaseContext, Context } from './context'
-import { createContext, parseHeaders } from './context'
+import type { Context, RawContext } from './context'
+import { createRawContext, parseHeaders, withApp } from './context'
 import { isNativeAvailable, isTlsAvailable, loadNativeBinding } from './native'
 import type { Route, RouteHandlerFn } from './router'
 
@@ -67,12 +67,33 @@ export type TlsOptions = {
  * Context provider function - creates app context for each request
  * Can be sync (static context) or async (per-request context)
  */
-export type ContextProvider<App> = (baseCtx: BaseContext) => App | Promise<App>
+export type ContextProvider<App> = (raw: RawContext) => App | Promise<App>
 
 /**
- * Middleware type - wraps the router handler
+ * Middleware type - polymorphic over App
+ *
+ * Middleware works with any App type, making it usable as both
+ * global middleware and route-level middleware.
+ *
+ * @example
+ * ```typescript
+ * // Middleware that works with any App
+ * const cors = (options?: CorsOptions): Middleware =>
+ *   <App>(handler: Handler<Context<App>>) =>
+ *     async (ctx: Context<App>) => {
+ *       // Add CORS headers
+ *       const res = await handler(ctx)
+ *       return { ...res, headers: { ...res.headers, ...corsHeaders } }
+ *     }
+ *
+ * // Usage - no type annotations needed
+ * serve({
+ *   middleware: cors(),
+ *   routes: [...]
+ * })
+ * ```
  */
-export type Middleware = (handler: Handler<BaseContext>) => Handler<BaseContext>
+export type Middleware = <App>(handler: Handler<Context<App>>) => Handler<Context<App>>
 
 /**
  * Serve options
@@ -118,7 +139,7 @@ export type Server = {
 const createHandler = <App>(
 	routes: Route<string, string, App>[],
 	contextProvider?: ContextProvider<App>
-): Handler<BaseContext> => {
+): Handler<Context<App>> => {
 	type WasmRouterType = {
 		insert: (m: string, p: string, id: number) => void
 		find: (
@@ -149,9 +170,9 @@ const createHandler = <App>(
 		return wasmRouter
 	}
 
-	return async (baseCtx: BaseContext) => {
+	return async (ctx: Context<App>) => {
 		const r = initRouter()
-		const match = r.find(baseCtx.method, baseCtx.path)
+		const match = r.find(ctx.method, ctx.path)
 
 		if (!match.found) {
 			match.free()
@@ -175,11 +196,32 @@ const createHandler = <App>(
 			return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not Found' }
 		}
 
-		// Create full context with app
-		const app = contextProvider ? await contextProvider(baseCtx) : ({} as App)
-		const ctx = { ...baseCtx, params, app } as Context<App> & { params: Record<string, string> }
+		// Update params in context
+		const ctxWithParams = { ...ctx, params: { ...ctx.params, ...params } }
 
-		return h({ ctx, input: undefined as void })
+		return h({ ctx: ctxWithParams, input: undefined as never })
+	}
+}
+
+/**
+ * Create the entry handler that builds Context<App> and routes
+ */
+const createEntryHandler = <App>(
+	routes: Route<string, string, App>[],
+	contextProvider?: ContextProvider<App>,
+	middleware?: Middleware
+): Handler<RawContext> => {
+	const routerHandler = createHandler(routes, contextProvider)
+
+	// Wrap with middleware if provided
+	const finalHandler = middleware ? middleware<App>(routerHandler) : routerHandler
+
+	return async (raw: RawContext) => {
+		// Create app context
+		const app = contextProvider ? await contextProvider(raw) : ({} as App)
+		const ctx = withApp(raw, app)
+
+		return finalHandler(ctx)
 	}
 }
 
@@ -194,6 +236,7 @@ const createHandler = <App>(
  * serve({
  *   routes: [get('/users', ({ ctx }) => json(ctx.app.db.getUsers()))],
  *   context: () => ({ db: createDb() }),
+ *   middleware: cors(),
  *   port: 3000,
  * })
  * ```
@@ -208,9 +251,7 @@ export const serve = async <App = Record<string, never>>(
 	const port = options.port ?? (options.tls ? 443 : 3000)
 	const hostname = options.hostname ?? '0.0.0.0'
 	const useTls = !!options.tls
-	const routerHandler = createHandler(options.routes, options.context)
-	// Apply global middleware if provided
-	const handler = options.middleware ? options.middleware(routerHandler) : routerHandler
+	const handler = createEntryHandler(options.routes, options.context, options.middleware)
 
 	// Try native server first (supports both HTTP and HTTPS)
 	if (isNativeAvailable()) {
@@ -241,7 +282,7 @@ export const serve = async <App = Record<string, never>>(
  */
 const serveNative = async <App>(
 	options: ServeOptions<App>,
-	handler: Handler<BaseContext>,
+	handler: Handler<RawContext>,
 	port: number,
 	hostname: string,
 	useTls: boolean
@@ -303,8 +344,8 @@ const serveNative = async <App>(
 				// Parse body if present
 				const bodyBuffer = ctx.body ? Buffer.from(ctx.body) : Buffer.alloc(0)
 
-				// Create base context for the handler
-				const fullCtx: BaseContext = {
+				// Create raw context for the handler
+				const rawCtx: RawContext = {
 					method: ctx.method,
 					path: ctx.path,
 					query: ctx.query ?? '',
@@ -322,7 +363,7 @@ const serveNative = async <App>(
 					socket: null as unknown as Socket, // Not available for native
 				}
 
-				const response = await handler(fullCtx)
+				const response = await handler(rawCtx)
 
 				// Convert ServerResponse to native format
 				const headers: Record<string, string> = {}
@@ -386,7 +427,7 @@ const serveNative = async <App>(
  */
 const serveJs = async <App>(
 	options: ServeOptions<App>,
-	handler: Handler<BaseContext>,
+	handler: Handler<RawContext>,
 	port: number,
 	hostname: string,
 	useTls: boolean
@@ -520,7 +561,7 @@ type ConnectionState = {
  */
 const handleConnection = (
 	socket: Socket | TLSSocket,
-	handler: Handler<BaseContext>,
+	handler: Handler<RawContext>,
 	wasm: WasmCore,
 	config: ConnectionConfig
 ): void => {
@@ -622,7 +663,7 @@ const handleConnection = (
 
 			try {
 				const headers = parseHeaders(requestBuffer, parsed.header_offsets, parsed.headers_count)
-				const ctx = createContext(socket, requestBuffer, parsed, headers)
+				const ctx = createRawContext(socket, requestBuffer, parsed, headers)
 
 				// Determine if keep-alive
 				const connectionHeader = headers.connection?.toLowerCase() || ''

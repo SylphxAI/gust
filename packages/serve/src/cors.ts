@@ -3,9 +3,10 @@
  * Wrapper for handling CORS preflight and response headers
  */
 
-import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
+import type { Handler, ServerResponse } from '@sylphx/gust-core'
 import { response } from '@sylphx/gust-core'
-import type { BaseContext } from './context'
+import type { Context } from './context'
+import type { Middleware } from './serve'
 
 export type CorsOptions = {
 	/** Allowed origins (string, array, or function) */
@@ -109,18 +110,28 @@ const createPreflightHeaders = (origin: string, options: CorsOptions): Record<st
 }
 
 /**
- * Create CORS wrapper
- * Handles preflight OPTIONS requests and adds CORS headers to responses
+ * Create CORS middleware
  *
- * Works as both global middleware (BaseContext) and route middleware (Context)
+ * Handles preflight OPTIONS requests and adds CORS headers to responses.
+ * Works as both global middleware and route-level middleware.
+ *
+ * @example
+ * ```typescript
+ * // Global middleware
+ * serve({
+ *   middleware: cors({ origin: 'https://example.com' }),
+ *   routes: [...]
+ * })
+ *
+ * // Route-level (via compose)
+ * get('/api', compose(cors(), handler))
+ * ```
  */
-export const cors = <Ctx extends BaseContext = BaseContext>(
-	options: CorsOptions = {}
-): Wrapper<Ctx> => {
+export const cors = (options: CorsOptions = {}): Middleware => {
 	const handlePreflight = options.preflight !== false
 
-	return (handler: Handler<Ctx>): Handler<Ctx> => {
-		return async (ctx: Ctx): Promise<ServerResponse> => {
+	return <App>(handler: Handler<Context<App>>): Handler<Context<App>> =>
+		async (ctx: Context<App>): Promise<ServerResponse> => {
 			const origin = ctx.headers.origin || ''
 
 			// Handle preflight OPTIONS request
@@ -149,15 +160,14 @@ export const cors = <Ctx extends BaseContext = BaseContext>(
 				headers: mergedHeaders,
 			}
 		}
-	}
 }
 
 /**
  * Simple CORS - allows all origins
  * Convenience wrapper for development
  */
-export const simpleCors = <Ctx extends BaseContext = BaseContext>(): Wrapper<Ctx> =>
-	cors<Ctx>({
+export const simpleCors = (): Middleware =>
+	cors({
 		origin: '*',
 		methods: DEFAULT_METHODS,
 		allowedHeaders: DEFAULT_ALLOWED_HEADERS,
