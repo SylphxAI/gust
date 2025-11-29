@@ -165,4 +165,4 @@ export type BaseContext = Context<Record<string, never>>
  * Legacy alias for createRawContext
  * @deprecated Use createRawContext instead
  */
-export const createContext = createRawContext
+export const createContext: typeof createRawContext = createRawContext
