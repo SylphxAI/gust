@@ -36,6 +36,42 @@
 
 - add streaming examples to README ([a53d8d9](https://github.com/SylphxAI/gust/commit/a53d8d95de8701cb31e0b533818d9ed4c34834fb))
 
+## 0.1.5 (2025-11-29)
+
+### ✨ Features
+
+- **serve:** add WASM fallback for native functions ([e63da74](https://github.com/SylphxAI/gust/commit/e63da7427f7897c628b9253473c8465a09f0c7c4))
+- **wasm:** add WebSocket, validation, and tracing modules ([c4d6352](https://github.com/SylphxAI/gust/commit/c4d63523070295406fb20fba7f5ae87e6223268e))
+- **native:** add complete server features ([bd7d4c1](https://github.com/SylphxAI/gust/commit/bd7d4c1a7ba80ccf3831975a5844d6a2884fbcd7))
+- **native:** add TLS, HTTP/2, compression, and WebSocket support ([3abfdff](https://github.com/SylphxAI/gust/commit/3abfdff06cf4d2da814c7f38ce634e103309e761))
+- **router:** simplify API with callable route accessors ([d709c2f](https://github.com/SylphxAI/gust/commit/d709c2ff7d81979defcb492da2c3300ba92642d4))
+- **router:** preserve nested router structure in routes and url ([4279bbf](https://github.com/SylphxAI/gust/commit/4279bbfa7e67eb661bd6c03f8274add644cbc1ac))
+- **router:** support nested routers directly ([2836480](https://github.com/SylphxAI/gust/commit/28364804528c789ff8cb8d524b4c8256df2fffaa))
+- **router:** add prefix support to router() ([54f79a5](https://github.com/SylphxAI/gust/commit/54f79a5a9698626c31e00fe5a3fc325a6c0b0fe1))
+- **napi:** implement native-first server with dynamic route handlers ([7472f78](https://github.com/SylphxAI/gust/commit/7472f78162cbc279f3b8b10045e61da36649c33c))
+- **napi:** add native bindings for new Rust middleware ([7a153d1](https://github.com/SylphxAI/gust/commit/7a153d14481eda43d0d180888d34732dc2f5355f))
+- **serve:** update TypeScript bindings for native middleware ([54c61cd](https://github.com/SylphxAI/gust/commit/54c61cd8b888c563d6a1c5908e44950f0a9d842f))
+- **serve:** add zero-overhead Turbo server with JIT routing ([93c6538](https://github.com/SylphxAI/gust/commit/93c65380682c285ea190188f974d6f08d4716596))
+
+### ⚡️ Performance
+
+- **serve:** optimize throughput with reduced allocations ([a18cade](https://github.com/SylphxAI/gust/commit/a18cade9f12217dce02825720f55adce44a1ad69))
+
+### ♻️ Refactoring
+
+- **router:** redesign Context API with App generic ([f83b131](https://github.com/SylphxAI/gust/commit/f83b1316d1d91649daedf2d61a6e36fdf7e22959))
+- **websocket:** remove JS fallback, require native/WASM ([64f6e33](https://github.com/SylphxAI/gust/commit/64f6e33bd5d7ea8e654869549b7b6530fa74ae95))
+- **session,csrf:** use native/WASM for random generation ([4e55f55](https://github.com/SylphxAI/gust/commit/4e55f552c35d892a2f4a506a4ed0cf33470f94a9))
+- **tracing:** use native/WASM for ID generation ([073ab8c](https://github.com/SylphxAI/gust/commit/073ab8ce48bea0b9a97d3cbf029ea35dd84ac55c))
+- **ts:** use native implementations with JS fallback ([2ff2c59](https://github.com/SylphxAI/gust/commit/2ff2c59f74124f64a3b9a28a11d91046b4e6880f))
+- **router:** simplify by removing nested router support ([8a0194c](https://github.com/SylphxAI/gust/commit/8a0194cc91eb27fe91341f2ac9cd9f3f159eff4b))
+- hide internal native implementation from public API ([0cfb0d4](https://github.com/SylphxAI/gust/commit/0cfb0d49c8cc38df8552d12bba7a9a3d61e478d0))
+- restructure to standard Rust + TypeScript monorepo layout ([bb0b295](https://github.com/SylphxAI/gust/commit/bb0b295c0286cdb112b1b9a04126490041435487))
+
+### 📚 Documentation
+
+- add streaming examples to README ([a53d8d9](https://github.com/SylphxAI/gust/commit/a53d8d95de8701cb31e0b533818d9ed4c34834fb))
+
 ## 0.1.4 (2025-11-28)
 
 ### ✨ Features
