@@ -5,7 +5,7 @@
 
 import { brotliCompressSync, constants, deflateSync, gzipSync } from 'node:zlib'
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import type { Context } from './context'
+import type { BaseContext } from './context'
 
 export type CompressionOptions = {
 	/** Minimum size to compress (default: 1024 bytes) */
@@ -110,8 +110,12 @@ const compressData = (data: Buffer, encoding: 'br' | 'gzip' | 'deflate', level: 
 
 /**
  * Create compression wrapper
+ *
+ * Works as both global middleware (BaseContext) and route middleware (Context)
  */
-export const compress = (options: CompressionOptions = {}): Wrapper<Context> => {
+export const compress = <Ctx extends BaseContext = BaseContext>(
+	options: CompressionOptions = {}
+): Wrapper<Ctx> => {
 	const {
 		threshold = 1024,
 		level = 6,
@@ -119,8 +123,8 @@ export const compress = (options: CompressionOptions = {}): Wrapper<Context> => 
 		mimeTypes = DEFAULT_COMPRESSIBLE_TYPES,
 	} = options
 
-	return (handler: Handler<Context>): Handler<Context> => {
-		return async (ctx: Context): Promise<ServerResponse> => {
+	return (handler: Handler<Ctx>): Handler<Ctx> => {
+		return async (ctx: Ctx): Promise<ServerResponse> => {
 			// Execute handler
 			const response = await handler(ctx)
 
@@ -189,9 +193,11 @@ export const compress = (options: CompressionOptions = {}): Wrapper<Context> => 
 /**
  * Convenience wrapper for gzip-only compression
  */
-export const gzip = (level = 6): Wrapper<Context> => compress({ encodings: ['gzip'], level })
+export const gzip = <Ctx extends BaseContext = BaseContext>(level = 6): Wrapper<Ctx> =>
+	compress<Ctx>({ encodings: ['gzip'], level })
 
 /**
  * Convenience wrapper for brotli-only compression
  */
-export const brotli = (level = 6): Wrapper<Context> => compress({ encodings: ['br'], level })
+export const brotli = <Ctx extends BaseContext = BaseContext>(level = 6): Wrapper<Ctx> =>
+	compress<Ctx>({ encodings: ['br'], level })

@@ -5,7 +5,7 @@
 
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
 import { response } from '@sylphx/gust-core'
-import type { Context } from './context'
+import type { BaseContext } from './context'
 
 export type CorsOptions = {
 	/** Allowed origins (string, array, or function) */
@@ -111,12 +111,16 @@ const createPreflightHeaders = (origin: string, options: CorsOptions): Record<st
 /**
  * Create CORS wrapper
  * Handles preflight OPTIONS requests and adds CORS headers to responses
+ *
+ * Works as both global middleware (BaseContext) and route middleware (Context)
  */
-export const cors = (options: CorsOptions = {}): Wrapper<Context> => {
+export const cors = <Ctx extends BaseContext = BaseContext>(
+	options: CorsOptions = {}
+): Wrapper<Ctx> => {
 	const handlePreflight = options.preflight !== false
 
-	return (handler: Handler<Context>): Handler<Context> => {
-		return async (ctx: Context): Promise<ServerResponse> => {
+	return (handler: Handler<Ctx>): Handler<Ctx> => {
+		return async (ctx: Ctx): Promise<ServerResponse> => {
 			const origin = ctx.headers.origin || ''
 
 			// Handle preflight OPTIONS request
@@ -152,8 +156,8 @@ export const cors = (options: CorsOptions = {}): Wrapper<Context> => {
  * Simple CORS - allows all origins
  * Convenience wrapper for development
  */
-export const simpleCors = (): Wrapper<Context> =>
-	cors({
+export const simpleCors = <Ctx extends BaseContext = BaseContext>(): Wrapper<Ctx> =>
+	cors<Ctx>({
 		origin: '*',
 		methods: DEFAULT_METHODS,
 		allowedHeaders: DEFAULT_ALLOWED_HEADERS,

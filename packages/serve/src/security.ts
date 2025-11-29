@@ -4,7 +4,7 @@
  */
 
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import type { Context } from './context'
+import type { BaseContext } from './context'
 
 export type SecurityOptions = {
 	/** Content Security Policy */
@@ -41,8 +41,12 @@ const DEFAULT_CSP = "default-src 'self'"
 
 /**
  * Create security headers wrapper
+ *
+ * Works as both global middleware (BaseContext) and route middleware (Context)
  */
-export const security = (options: SecurityOptions = {}): Wrapper<Context> => {
+export const security = <Ctx extends BaseContext = BaseContext>(
+	options: SecurityOptions = {}
+): Wrapper<Ctx> => {
 	const headers: Record<string, string> = {}
 
 	// Content-Security-Policy
@@ -109,8 +113,8 @@ export const security = (options: SecurityOptions = {}): Wrapper<Context> => {
 		headers['x-xss-protection'] = '0' // Recommended to disable as it can cause vulnerabilities
 	}
 
-	return (handler: Handler<Context>): Handler<Context> => {
-		return async (ctx: Context): Promise<ServerResponse> => {
+	return (handler: Handler<Ctx>): Handler<Ctx> => {
+		return async (ctx: Ctx): Promise<ServerResponse> => {
 			const res = await handler(ctx)
 
 			return {
@@ -127,8 +131,8 @@ export const security = (options: SecurityOptions = {}): Wrapper<Context> => {
 /**
  * Pre-configured security for strict mode
  */
-export const strictSecurity = (): Wrapper<Context> =>
-	security({
+export const strictSecurity = <Ctx extends BaseContext = BaseContext>(): Wrapper<Ctx> =>
+	security<Ctx>({
 		contentSecurityPolicy:
 			"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; frame-ancestors 'none'",
 		crossOriginEmbedderPolicy: 'require-corp',
@@ -142,8 +146,8 @@ export const strictSecurity = (): Wrapper<Context> =>
 /**
  * Pre-configured security for API servers
  */
-export const apiSecurity = (): Wrapper<Context> =>
-	security({
+export const apiSecurity = <Ctx extends BaseContext = BaseContext>(): Wrapper<Ctx> =>
+	security<Ctx>({
 		contentSecurityPolicy: false, // APIs don't need CSP
 		crossOriginEmbedderPolicy: false,
 		crossOriginOpenerPolicy: false,

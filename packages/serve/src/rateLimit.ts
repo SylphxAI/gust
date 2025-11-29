@@ -5,19 +5,19 @@
 
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
 import { json } from '@sylphx/gust-core'
-import type { Context } from './context'
+import type { BaseContext } from './context'
 
-export type RateLimitOptions = {
+export type RateLimitOptions<Ctx extends BaseContext = BaseContext> = {
 	/** Maximum requests per window */
 	readonly max: number
 	/** Window size in milliseconds */
 	readonly windowMs: number
 	/** Key generator (default: IP address) */
-	readonly keyGenerator?: (ctx: Context) => string
+	readonly keyGenerator?: (ctx: Ctx) => string
 	/** Skip rate limiting for certain requests */
-	readonly skip?: (ctx: Context) => boolean
+	readonly skip?: (ctx: Ctx) => boolean
 	/** Custom response when rate limited */
-	readonly onLimitReached?: (ctx: Context) => ServerResponse
+	readonly onLimitReached?: (ctx: Ctx) => ServerResponse
 	/** Include rate limit headers in response */
 	readonly headers?: boolean
 	/** Use sliding window (more accurate but uses more memory) */
@@ -76,7 +76,7 @@ class RateLimitStore {
 /**
  * Get client IP from context
  */
-const getClientIp = (ctx: Context): string => {
+const getClientIp = <Ctx extends BaseContext>(ctx: Ctx): string => {
 	// Try X-Forwarded-For first (for proxies)
 	const forwarded = ctx.headers['x-forwarded-for']
 	if (forwarded) {
@@ -167,12 +167,16 @@ const slidingWindowCheck = (
 
 /**
  * Create rate limiting wrapper
+ *
+ * Works as both global middleware (BaseContext) and route middleware (Context)
  */
-export const rateLimit = (options: RateLimitOptions): Wrapper<Context> => {
+export const rateLimit = <Ctx extends BaseContext = BaseContext>(
+	options: RateLimitOptions<Ctx>
+): Wrapper<Ctx> => {
 	const {
 		max,
 		windowMs,
-		keyGenerator = getClientIp,
+		keyGenerator = getClientIp<Ctx>,
 		skip,
 		onLimitReached,
 		headers = true,
@@ -181,8 +185,8 @@ export const rateLimit = (options: RateLimitOptions): Wrapper<Context> => {
 
 	const store = new RateLimitStore(windowMs)
 
-	return (handler: Handler<Context>): Handler<Context> => {
-		return async (ctx: Context): Promise<ServerResponse> => {
+	return (handler: Handler<Ctx>): Handler<Ctx> => {
+		return async (ctx: Ctx): Promise<ServerResponse> => {
 			// Check if should skip
 			if (skip?.(ctx)) {
 				return handler(ctx)
@@ -243,21 +247,21 @@ export type RateLimitStore2 = {
 	get(key: string): Promise<{ count: number; resetTime: number } | null>
 }
 
-export const rateLimitWithStore = (
-	options: Omit<RateLimitOptions, 'slidingWindow'> & { store: RateLimitStore2 }
-): Wrapper<Context> => {
+export const rateLimitWithStore = <Ctx extends BaseContext = BaseContext>(
+	options: Omit<RateLimitOptions<Ctx>, 'slidingWindow'> & { store: RateLimitStore2 }
+): Wrapper<Ctx> => {
 	const {
 		max,
 		windowMs,
-		keyGenerator = getClientIp,
+		keyGenerator = getClientIp<Ctx>,
 		skip,
 		onLimitReached,
 		headers = true,
 		store,
 	} = options
 
-	return (handler: Handler<Context>): Handler<Context> => {
-		return async (ctx: Context): Promise<ServerResponse> => {
+	return (handler: Handler<Ctx>): Handler<Ctx> => {
+		return async (ctx: Ctx): Promise<ServerResponse> => {
 			if (skip?.(ctx)) {
 				return handler(ctx)
 			}
