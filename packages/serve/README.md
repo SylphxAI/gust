@@ -21,6 +21,81 @@ High performance functional HTTP server powered by WASM.
 | **Observability** | Tracing, Logging, Health checks, OpenTelemetry |
 | **Utilities** | Validation, Body parsing, Cookies, Static files |
 
+## Architecture
+
+Gust uses a **two-tier architecture** for optimal performance:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     @sylphx/gust                            │
+│         TypeScript API • Middleware • Type Safety           │
+├─────────────────────────────────────────────────────────────┤
+│                   @sylphx/gust-core                         │
+│              WASM Router • Response Helpers                 │
+├─────────────────────────────┬───────────────────────────────┤
+│           Native            │          JS + WASM            │
+│   Rust + napi-rs + hyper    │    node:net + WASM parser     │
+│         ~233k r/s           │         (TLS only)            │
+└─────────────────────────────┴───────────────────────────────┘
+```
+
+### Core Components
+
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| **Native** | Rust + napi-rs + hyper | Maximum performance with multi-threaded worker pool |
+| **WASM** | Rust + wasm-bindgen | Cross-platform Radix Trie router, zero-copy HTTP parsing |
+| **TypeScript** | Pure TS | Middleware, composition utilities, type inference |
+
+### Key Optimizations
+
+- **mimalloc allocator** - Faster memory allocation in native layer
+- **Pre-allocated responses** - Zero-allocation for common HTTP responses (404, 500, etc.)
+- **Radix Trie router** - O(k) route matching where k = path segments
+- **Zero-copy parsing** - WASM returns byte offsets, strings extracted on-demand
+- **ArcSwap handlers** - Lock-free handler updates in native layer
+
+## Benchmarks
+
+Benchmarks run on Apple M2 Pro with wrk (4 threads, 100 connections, 10s duration).
+
+### Bun Runtime
+
+| Framework | Requests/sec | Latency (avg) | vs Gust |
+|-----------|-------------|---------------|---------|
+| **Gust** | **232,704** | **417μs** | baseline |
+| Elysia | 192,386 | 520μs | 1.21x slower |
+| Bun.serve | 183,716 | 543μs | 1.27x slower |
+| Hono | 157,729 | 633μs | 1.48x slower |
+| Fastify | 144,860 | 693μs | 1.61x slower |
+| H3 | 122,018 | 806μs | 1.91x slower |
+| Express | 99,781 | 1.00ms | 2.33x slower |
+
+> **Note**: Gust is Bun-first. Node.js native support is planned.
+
+### Run Benchmarks
+
+```bash
+# Bun
+cd benchmarks && bun run bench.ts
+
+# Node.js
+cd benchmarks && node --experimental-strip-types bench.ts
+```
+
+## Bundle Size
+
+| Component | Size | Gzipped | Note |
+|-----------|------|---------|------|
+| **JavaScript** | 197 KB | 42 KB | Includes all 20+ middleware |
+| **Type Definitions** | 74 KB | - | Full API types |
+| **WASM Module** | 59 KB | 27 KB | Inlined in JS bundle |
+| **Native Binary** | 1.7 MB | - | Per-platform |
+
+The JS bundle includes WASM bindings inline and all built-in middleware (auth, validation, rate limiting, OpenTelemetry, etc.). Tree-shaking removes unused middleware in production builds.
+
+> **Note**: Native binaries are platform-specific. CI builds for Linux (x64/arm64), macOS (x64/arm64), and Windows (x64).
+
 ## Installation
 
 ```bash
