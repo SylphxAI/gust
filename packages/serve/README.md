@@ -370,10 +370,10 @@ get('/users/:id', ({ ctx, input }) => {
 ### Context Types
 
 ```typescript
-import { serve, createRouter, type Context, type BaseContext } from '@sylphx/gust'
+import { serve, createRouter, type Context } from '@sylphx/gust'
 
-// BaseContext - HTTP request data (library-provided)
-type BaseContext = {
+// Context<App> - HTTP request data + user's app context
+type Context<App> = {
   readonly method: string
   readonly path: string
   readonly query: string
@@ -381,10 +381,8 @@ type BaseContext = {
   readonly params: Record<string, string>
   readonly body: Buffer
   readonly json: <T>() => T
+  readonly app: App  // Your typed app context
 }
-
-// Context<App> - BaseContext + user's app context
-type Context<App> = BaseContext & { readonly app: App }
 
 // Define your app type
 type App = { db: Database; user: User | null }
@@ -394,6 +392,40 @@ const { get, post } = createRouter<App>()
 
 // ctx.app.db and ctx.app.user are fully typed
 const route = get('/users', ({ ctx }) => json(ctx.app.db.getUsers()))
+```
+
+### Middleware Types
+
+Middleware uses **bounded polymorphism** for type-safe options:
+
+```typescript
+import { type Middleware, type Context, rateLimit, cors, compose } from '@sylphx/gust'
+
+// Middleware<RequiredApp> - bounded polymorphism
+// - Middleware = Middleware<unknown> = universal (works with any App)
+// - Middleware<R> = bounded (requires App extends R)
+
+// Universal middleware - no App requirements
+const universalRL = rateLimit({ max: 100, windowMs: 60000 })
+//    ^? Middleware<unknown>
+
+// Bounded middleware - typed access to ctx.app
+const boundedRL = rateLimit({
+  max: 100,
+  windowMs: 60000,
+  keyGenerator: (ctx: Context<{ userId: string }>) => ctx.app.userId,
+})
+//    ^? Middleware<{ userId: string }>
+
+// Type safety at usage
+type MyApp = { userId: string; db: Database }
+boundedRL(handler)  // ✅ MyApp extends { userId: string }
+
+type BadApp = { name: string }
+boundedRL(badHandler)  // ❌ Compile error: BadApp missing userId
+
+// Compose works with both
+const middleware = compose(cors(), boundedRL)
 ```
 
 ### Response Helpers
