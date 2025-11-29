@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.8 (2025-11-29)
+
+### 🐛 Bug Fixes
+
+- **napi:** convert binding loader to ESM for Node.js compatibility ([efd934b](https://github.com/SylphxAI/gust/commit/efd934b242ba2ca52b67030bc640696fcfbb9693))
+
+### 📚 Documentation
+
+- add architecture and benchmarks sections ([3d95f34](https://github.com/SylphxAI/gust/commit/3d95f349791de0f4c28e1bce689dc7c5ab36c52b))
+- add Middleware types section with bounded polymorphism ([b3c3389](https://github.com/SylphxAI/gust/commit/b3c3389a2cb674d348b0a47653b9610cd08b2cd3))
+
 ## 0.1.7 (2025-11-29)
 
 ### 🐛 Bug Fixes
