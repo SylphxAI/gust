@@ -1,5 +1,11 @@
-const { existsSync, readFileSync } = require('node:fs')
-const { join } = require('node:path')
+import { execSync } from 'node:child_process'
+import { existsSync, readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 const { platform, arch } = process
 
@@ -10,7 +16,7 @@ let loadError = null
 function isMusl() {
 	if (!process.report || typeof process.report.getReport !== 'function') {
 		try {
-			const lddPath = require('node:child_process').execSync('which ldd').toString().trim()
+			const lddPath = execSync('which ldd').toString().trim()
 			return readFileSync(lddPath, 'utf8').includes('musl')
 		} catch {
 			return true
@@ -119,8 +125,4 @@ if (!nativeBinding) {
 	throw new Error(`Failed to load native binding`)
 }
 
-const { GustServer, isIoUringAvailable, getCpuCount } = nativeBinding
-
-module.exports.GustServer = GustServer
-module.exports.isIoUringAvailable = isIoUringAvailable
-module.exports.getCpuCount = getCpuCount
+export const { GustServer, isIoUringAvailable, getCpuCount } = nativeBinding

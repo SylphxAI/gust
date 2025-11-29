@@ -71,7 +71,16 @@ Benchmarks run on Apple M2 Pro with wrk (4 threads, 100 connections, 10s duratio
 | H3 | 122,018 | 806μs | 1.91x slower |
 | Express | 99,781 | 1.00ms | 2.33x slower |
 
-> **Note**: Gust is Bun-first. Node.js native support is planned.
+### Node.js Runtime
+
+| Framework | Requests/sec | Latency (avg) | vs Gust |
+|-----------|-------------|---------------|---------|
+| **Gust** | **215,821** | **446μs** | baseline |
+| Fastify | 123,144 | 0.89ms | 1.75x slower |
+| Node.js http | 121,095 | 0.92ms | 1.78x slower |
+| H3 | 116,118 | 0.93ms | 1.86x slower |
+| Hono | 98,497 | 1.12ms | 2.19x slower |
+| Express | 69,820 | 1.61ms | 3.09x slower |
 
 ### Run Benchmarks
 

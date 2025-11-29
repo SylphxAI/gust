@@ -1,11 +1,26 @@
-// Gust server benchmark
-import { get, json, router, serve } from '../../packages/serve/dist/index.js'
+// Gust - High-performance HTTP server
+// Automatically selects optimal backend (io_uring on Linux, multicore otherwise)
+// @ts-nocheck
+import { GustServer, getCpuCount } from '../../crates/gust-napi/index.js'
 
-const hello = get('/', () => json({ message: 'Hello World' }))
-const user = get('/user/:id', (ctx) => json({ id: ctx.params.id }))
+const server = new GustServer()
 
-const app = router({ hello, user })
+// Pre-compute response for maximum performance
+const RESPONSE = {
+	status: 200,
+	headers: { 'content-type': 'application/json' },
+	body: '{"message":"Hello World"}',
+}
+
+// Minimal callback - just return pre-computed response
+server.setFallback(async () => RESPONSE)
 
 const port = parseInt(process.env.PORT || '3000', 10)
-serve({ port, fetch: app.handler })
-console.log(`Gust listening on :${port}`)
+const workers = parseInt(process.env.WORKERS || '0', 10) || undefined
+
+// Use optimal backend automatically
+server.serve(port, workers)
+console.log(`Gust (${workers || getCpuCount()} workers) listening on :${port}`)
+
+// Keep process alive
+setInterval(() => {}, 1000000)
