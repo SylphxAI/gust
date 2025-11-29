@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7 (2025-11-29)
+
+### ⚡️ Performance
+
+- **wasm:** optimize HTTP parser with SIMD and single-pass parsing ([4c5777c](https://github.com/SylphxAI/gust/commit/4c5777c95bbba4009454d77748a42d65e974f9f7))
+
+### ♻️ Refactoring
+
+- consolidate WASM code into crates/gust-wasm ([3c3fbb9](https://github.com/SylphxAI/gust/commit/3c3fbb92bb54a8d7054d010e78d23679fd070428))
+
 ## 0.1.6 (2025-11-28)
 
 ### ✨ Features
