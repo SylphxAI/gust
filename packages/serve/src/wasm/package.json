@@ -1,0 +1,17 @@
+{
+  "name": "gust-wasm",
+  "type": "module",
+  "description": "High-performance HTTP parser and router for WASM",
+  "version": "0.1.0",
+  "license": "MIT",
+  "files": [
+    "gust_wasm_bg.wasm",
+    "gust_wasm.js",
+    "gust_wasm.d.ts"
+  ],
+  "main": "gust_wasm.js",
+  "types": "gust_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
