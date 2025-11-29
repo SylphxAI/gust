@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.6 (2025-11-29)
+
+### ✨ Features
+
+- **serve:** add global middleware option ([3a8b897](https://github.com/SylphxAI/gust/commit/3a8b89740dec1effd15f02415b08723e90870b08))
+
 ## 0.1.5 (2025-11-29)
 
 ### ✨ Features
