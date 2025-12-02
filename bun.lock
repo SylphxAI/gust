@@ -36,7 +36,7 @@
         "bunup": "^0.16.10",
       },
     },
-    "packages/serve": {
+    "packages/gust": {
       "name": "@sylphx/gust",
       "version": "0.1.7",
       "dependencies": {
@@ -212,7 +212,7 @@
 
     "@sylphx/doctor": ["@sylphx/doctor@1.24.1", "", { "dependencies": { "citty": "^0.1.6", "consola": "^3.4.2", "defu": "^6.1.4", "jiti": "^2.4.2", "picocolors": "^1.1.1" }, "bin": { "doctor": "dist/cli.js" } }, "sha512-lBxibz7xRy+doP0EgABW6G+NspmFbpaLs1ANyx6J0pdB6ymsigCQGXXuruemgtuvcaC4+IUp28LQ2BlYU24hYA=="],
 
-    "@sylphx/gust": ["@sylphx/gust@workspace:packages/serve"],
+    "@sylphx/gust": ["@sylphx/gust@workspace:packages/gust"],
 
     "@sylphx/gust-app": ["@sylphx/gust-app@workspace:packages/app"],
 

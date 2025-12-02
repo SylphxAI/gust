@@ -63,7 +63,7 @@
 
 | Package | Description | Size |
 |---------|-------------|------|
-| [@sylphx/gust](./packages/serve) | Main package (re-exports both) | ~87 B |
+| [@sylphx/gust](./packages/gust) | Main package (re-exports both) | ~87 B |
 | [@sylphx/gust-app](./packages/app) | Stateless app framework | 82 KB |
 | [@sylphx/gust-server](./packages/server) | Rust-powered HTTP server | 73 KB |
 | [@sylphx/gust-core](./packages/core) | Core WASM runtime | ~4 KB |
@@ -149,7 +149,7 @@ clusterServe({ app, workers: 4 })
 
 See individual package READMEs for detailed API:
 
-- [@sylphx/gust documentation](./packages/serve/README.md)
+- [@sylphx/gust documentation](./packages/gust/README.md)
 - [@sylphx/gust-app documentation](./packages/app/README.md) - Routes, middleware, validation
 - [@sylphx/gust-server documentation](./packages/server/README.md) - Server, WebSocket, SSE, streaming
 - [@sylphx/gust-core documentation](./packages/core/README.md)

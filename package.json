@@ -12,7 +12,7 @@
 	],
 	"scripts": {
 		"build:wasm": "cd packages/core && bun run build:wasm",
-		"example": "bun run packages/serve/examples/basic.ts",
+		"example": "bun run packages/gust/examples/basic.ts",
 		"lint": "biome check .",
 		"format": "biome format --write .",
 		"build": "turbo build",

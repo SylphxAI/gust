@@ -4,7 +4,7 @@
 	"files": {
 		"includes": [
 			"!packages/core/src/wasm",
-			"!packages/serve/src/wasm",
+			"!packages/gust/src/wasm",
 			"!packages/app/src/wasm",
 			"!.claude"
 		]
