@@ -56,6 +56,43 @@ const normalizeResponse = async (
 	return resolved as ServerResponse
 }
 
+/**
+ * Call handler with automatic signature detection
+ *
+ * Supports both Gust-style and fetch-style handlers:
+ * - Gust: ({ ctx, input }) => ServerResponse
+ * - Fetch: (request: Request) => Response
+ *
+ * Enables direct usage: `all('/graphql', yoga.fetch)`
+ */
+const callHandler = async (
+	handler: Function,
+	ctx: Context<unknown>,
+	input: unknown
+): Promise<ServerResponse> => {
+	// If no request available, can only use Gust-style
+	if (!ctx.request) {
+		return normalizeResponse(handler({ ctx, input }))
+	}
+
+	// Try Gust-style first ({ ctx, input })
+	try {
+		const result = handler({ ctx, input })
+
+		// Check if result looks valid (not undefined, has status or is Response)
+		const resolved = await result
+		if (resolved !== undefined && resolved !== null) {
+			// Valid result - could be ServerResponse or Response
+			return normalizeResponse(resolved)
+		}
+	} catch (e) {
+		// Gust-style failed, will try fetch-style below
+	}
+
+	// Fallback: try fetch-style (request: Request)
+	return normalizeResponse(handler(ctx.request))
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -289,8 +326,8 @@ const createRouterHandler = <App>(
 		// Update params in context
 		const ctxWithParams = { ...ctx, params: { ...ctx.params, ...params } }
 
-		// Normalize response - auto-convert fetch Response to ServerResponse
-		return normalizeResponse(h({ ctx: ctxWithParams, input: undefined as never }))
+		// Call handler with auto-detection (supports both Gust and fetch-style)
+		return callHandler(h, ctxWithParams, undefined)
 	}
 
 	return {
@@ -492,8 +529,8 @@ export const createApp = <App = Record<string, never>>(config: AppConfig<App>): 
 
 		// Create handler that just calls the matched handler
 		const directHandler: Handler<typeof ctx> = async (c) => {
-			// Normalize response - auto-convert fetch Response to ServerResponse
-			return normalizeResponse(h({ ctx: c, input: undefined as never }))
+			// Call handler with auto-detection (supports both Gust and fetch-style)
+			return callHandler(h, c, undefined)
 		}
 
 		// Apply middleware if present
