@@ -72,12 +72,13 @@ export { createApp } from './app'
 // Router DSL
 // ============================================================================
 
-export type { Route, RouteHandlerFn, Routes, TypedRouteBuilders } from './router'
+export type { FetchHandler, Route, RouteHandlerFn, Routes, TypedRouteBuilders } from './router'
 
 export {
 	all,
 	createRouter,
 	del,
+	fetchHandler,
 	get,
 	head,
 	options,

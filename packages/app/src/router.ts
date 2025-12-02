@@ -10,6 +10,71 @@ import type { ServerResponse } from '@sylphx/gust-core'
 import type { Context } from './context'
 
 // ============================================================================
+// Fetch Handler Adapter
+// ============================================================================
+
+/**
+ * Fetch-style handler type (Request → Response)
+ */
+export type FetchHandler = (request: Request) => Response | Promise<Response>
+
+/**
+ * Wrap a fetch-style handler for use with Gust routes
+ *
+ * Enables seamless integration with fetch-based libraries like:
+ * - GraphQL Yoga
+ * - tRPC
+ * - Hono
+ * - Any handler following the fetch convention
+ *
+ * @example
+ * ```typescript
+ * import { createYoga } from 'graphql-yoga'
+ *
+ * const yoga = createYoga({ schema })
+ *
+ * const app = createApp({
+ *   routes: [
+ *     // Direct integration - no manual conversion needed!
+ *     all('/graphql', fetchHandler(yoga.fetch)),
+ *   ],
+ * })
+ * ```
+ *
+ * @example
+ * ```typescript
+ * import { Hono } from 'hono'
+ *
+ * const hono = new Hono()
+ * hono.get('/hello', (c) => c.json({ hello: 'world' }))
+ *
+ * const app = createApp({
+ *   routes: [
+ *     // Mount Hono at /api
+ *     all('/api/*', fetchHandler(hono.fetch)),
+ *   ],
+ * })
+ * ```
+ */
+export const fetchHandler = <App = Record<string, never>>(
+	handler: FetchHandler
+): RouteHandlerFn<App, string> => {
+	return ({ ctx }) => {
+		if (!ctx.request) {
+			// Fallback: reconstruct request from context
+			const url = `http://localhost${ctx.path}${ctx.query ? `?${ctx.query}` : ''}`
+			const request = new Request(url, {
+				method: ctx.method,
+				headers: ctx.headers,
+				body: ctx.method !== 'GET' && ctx.method !== 'HEAD' ? ctx.body : undefined,
+			})
+			return handler(request) as unknown as ServerResponse
+		}
+		return handler(ctx.request) as unknown as ServerResponse
+	}
+}
+
+// ============================================================================
 // Type-Level Path Parsing
 // ============================================================================
 

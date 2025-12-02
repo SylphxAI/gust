@@ -23,10 +23,38 @@
 
 import type { Handler, ServerResponse } from '@sylphx/gust-core'
 import { getWasm, initWasm } from '@sylphx/gust-core'
-import type { RawContext } from './context'
-import { requestToRawContext, serverResponseToResponse, withApp } from './context'
+import type { Context, RawContext } from './context'
+import {
+	requestToRawContext,
+	responseToServerResponse,
+	serverResponseToResponse,
+	withApp,
+} from './context'
 import type { Route, RouteHandlerFn } from './router'
 import type { ContextProvider, Middleware } from './serve'
+
+// ============================================================================
+// Response Normalization
+// ============================================================================
+
+/**
+ * Normalize handler result - auto-convert Response to ServerResponse
+ *
+ * Allows handlers to return either ServerResponse or fetch Response.
+ * Enables seamless integration with fetch-based handlers like GraphQL Yoga.
+ */
+const normalizeResponse = async (
+	result: ServerResponse | Response | Promise<ServerResponse | Response>
+): Promise<ServerResponse> => {
+	const resolved = await result
+
+	// Check if it's a fetch Response (has arrayBuffer method)
+	if (resolved instanceof Response) {
+		return responseToServerResponse(resolved)
+	}
+
+	return resolved as ServerResponse
+}
 
 // ============================================================================
 // Types
@@ -261,7 +289,8 @@ const createRouterHandler = <App>(
 		// Update params in context
 		const ctxWithParams = { ...ctx, params: { ...ctx.params, ...params } }
 
-		return h({ ctx: ctxWithParams, input: undefined as never })
+		// Normalize response - auto-convert fetch Response to ServerResponse
+		return normalizeResponse(h({ ctx: ctxWithParams, input: undefined as never }))
 	}
 
 	return {
@@ -463,7 +492,8 @@ export const createApp = <App = Record<string, never>>(config: AppConfig<App>): 
 
 		// Create handler that just calls the matched handler
 		const directHandler: Handler<typeof ctx> = async (c) => {
-			return h({ ctx: c, input: undefined as never })
+			// Normalize response - auto-convert fetch Response to ServerResponse
+			return normalizeResponse(h({ ctx: c, input: undefined as never }))
 		}
 
 		// Apply middleware if present
