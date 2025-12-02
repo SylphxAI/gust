@@ -38,6 +38,20 @@ export type Context<App = Record<string, never>> = {
 	readonly raw: Buffer
 	readonly socket: Socket
 	readonly app: App
+	/**
+	 * Original Fetch Request (available when using app.fetch)
+	 *
+	 * Useful for delegating to other fetch-based handlers like GraphQL Yoga.
+	 *
+	 * @example
+	 * ```typescript
+	 * import { createYoga } from 'graphql-yoga'
+	 * const yoga = createYoga({ schema })
+	 *
+	 * all('/graphql', ({ ctx }) => yoga.fetch(ctx.request!))
+	 * ```
+	 */
+	readonly request?: Request
 }
 
 // =============================================================================
@@ -69,7 +83,9 @@ export type RouteHandler<App = Record<string, never>, Input = void> = (
  * Raw parsed context (internal - before app is added)
  * @internal
  */
-export type RawContext = Omit<Context<never>, 'app'>
+export type RawContext = Omit<Context<never>, 'app'> & {
+	readonly request?: Request
+}
 
 // =============================================================================
 // Context Creation
@@ -226,6 +242,7 @@ export const requestToRawContext = async (request: Request): Promise<RawContext>
 		},
 		raw: body,
 		socket: null as unknown as Socket, // Not available in Fetch API
+		request, // Store original request for delegation to other handlers
 	}
 }
 
@@ -281,6 +298,93 @@ export const serverResponseToResponse = (
 		status: response.status,
 		headers,
 	})
+}
+
+/**
+ * Convert Web Fetch Response to ServerResponse
+ *
+ * Used for delegating to other fetch-based handlers (GraphQL Yoga, tRPC, etc.)
+ * and returning their responses through Gust.
+ *
+ * @example
+ * ```typescript
+ * import { createYoga } from 'graphql-yoga'
+ * const yoga = createYoga({ schema })
+ *
+ * all('/graphql', async ({ ctx }) => {
+ *   const response = await yoga.fetch(ctx.request!)
+ *   return responseToServerResponse(response)
+ * })
+ * ```
+ */
+export const responseToServerResponse = async (
+	response: Response
+): Promise<import('@sylphx/gust-core').ServerResponse> => {
+	// Convert headers
+	const headers: Record<string, string> = {}
+	response.headers.forEach((value, key) => {
+		headers[key] = value
+	})
+
+	// Handle streaming vs buffered body
+	if (response.body) {
+		// Check if it's a streaming response by content-type
+		const contentType = response.headers.get('content-type') || ''
+		const isStreaming =
+			contentType.includes('text/event-stream') ||
+			contentType.includes('application/x-ndjson') ||
+			response.headers.get('transfer-encoding') === 'chunked'
+
+		if (isStreaming) {
+			// Return streaming body as AsyncIterable
+			return {
+				status: response.status,
+				headers,
+				body: readableStreamToAsyncIterable(response.body) as unknown as string,
+			}
+		}
+
+		// Buffer non-streaming body
+		const arrayBuffer = await response.arrayBuffer()
+		return {
+			status: response.status,
+			headers,
+			body: Buffer.from(arrayBuffer),
+		}
+	}
+
+	return {
+		status: response.status,
+		headers,
+		body: '',
+	}
+}
+
+/**
+ * Convert ReadableStream to AsyncIterable
+ */
+const readableStreamToAsyncIterable = (
+	stream: ReadableStream<Uint8Array>
+): AsyncIterable<Uint8Array> => {
+	const reader = stream.getReader()
+
+	return {
+		[Symbol.asyncIterator]() {
+			return {
+				async next() {
+					const { value, done } = await reader.read()
+					if (done) {
+						return { value: undefined, done: true }
+					}
+					return { value, done: false }
+				},
+				async return() {
+					reader.releaseLock()
+					return { value: undefined, done: true }
+				},
+			}
+		},
+	}
 }
 
 /**

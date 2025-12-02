@@ -98,6 +98,7 @@ export {
 	createRawContext,
 	parseHeaders,
 	requestToRawContext,
+	responseToServerResponse,
 	serverResponseToResponse,
 	withApp,
 	withParams,
