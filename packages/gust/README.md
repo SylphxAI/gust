@@ -236,6 +236,34 @@ const app = createApp({
 await clusterServe({ app, port: 3000, workers: 4 })
 ```
 
+### External Handler Integration
+
+Seamlessly integrate fetch-based handlers like GraphQL Yoga, tRPC, Hono:
+
+```typescript
+import { createApp, serve, all, get, json } from '@sylphx/gust'
+import { createYoga, createSchema } from 'graphql-yoga'
+
+const yoga = createYoga({
+  schema: createSchema({
+    typeDefs: `type Query { hello: String }`,
+    resolvers: { Query: { hello: () => 'Hello!' } },
+  }),
+})
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello' })),
+    // Direct integration - just pass the handler!
+    all('/graphql', yoga.fetch),
+  ],
+})
+
+await serve({ app, port: 3000 })
+```
+
+Works with any fetch-compatible handler (Hono, tRPC, etc.) - auto-detects handler signature and converts Response types automatically.
+
 ## API Reference
 
 See the sub-package documentation for detailed API:

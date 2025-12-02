@@ -148,10 +148,51 @@ get('/users/:id', ({ ctx, input }) => {
   ctx.body       // Raw body buffer
   ctx.json<T>()  // Parse JSON body
   ctx.app        // User-defined app context
+  ctx.request    // Original Request (for delegation)
 
   return json({ id: ctx.params.id })
 })
 ```
+
+### External Handler Integration
+
+Seamlessly integrate fetch-based handlers like GraphQL Yoga, tRPC, Hono:
+
+```typescript
+import { createApp, all } from '@sylphx/gust-app'
+import { createYoga, createSchema } from 'graphql-yoga'
+
+const yoga = createYoga({
+  schema: createSchema({
+    typeDefs: `type Query { hello: String }`,
+    resolvers: { Query: { hello: () => 'Hello!' } },
+  }),
+})
+
+const app = createApp({
+  routes: [
+    // Direct integration - auto-detects fetch-style handlers!
+    all('/graphql', yoga.fetch),
+  ],
+})
+```
+
+Works with any fetch-compatible handler:
+
+```typescript
+import { Hono } from 'hono'
+import { fetchRequestHandler } from '@trpc/server/adapters/fetch'
+
+// Hono
+const hono = new Hono()
+hono.get('/hello', (c) => c.json({ hello: 'world' }))
+all('/api/*', hono.fetch)
+
+// tRPC
+all('/trpc/*', (req) => fetchRequestHandler({ req, router, endpoint: '/trpc' }))
+```
+
+Handlers can return either `ServerResponse` or standard `Response` - both work automatically.
 
 ### Response Helpers
 

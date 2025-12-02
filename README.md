@@ -76,6 +76,7 @@
 - **Batteries included** - 20+ middleware (auth, validation, rate limiting, etc.)
 - **Streaming** - SSE, WebSocket, range requests for media
 - **Production-ready** - Health checks, graceful shutdown, OpenTelemetry
+- **Ecosystem Compatible** - Direct integration with GraphQL Yoga, tRPC, Hono, etc.
 
 ## Quick Start
 
@@ -143,6 +144,26 @@ serve({ port: 3000, fetch: websocket({ ... }) })
 
 // Cluster mode
 clusterServe({ app, workers: 4 })
+```
+
+### External Handler Integration
+
+Seamlessly integrate GraphQL Yoga, tRPC, Hono, or any fetch-based handler:
+
+```typescript
+import { createApp, serve, all } from '@sylphx/gust'
+import { createYoga } from 'graphql-yoga'
+
+const yoga = createYoga({ schema })
+
+const app = createApp({
+  routes: [
+    // Direct integration - just pass the handler!
+    all('/graphql', yoga.fetch),
+  ],
+})
+
+await serve({ app, port: 3000 })
 ```
 
 ## Documentation
