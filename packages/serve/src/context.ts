@@ -166,3 +166,153 @@ export type BaseContext = Context<Record<string, never>>
  * @deprecated Use createRawContext instead
  */
 export const createContext: typeof createRawContext = createRawContext
+
+// =============================================================================
+// Fetch API Conversion Utilities
+// =============================================================================
+
+/**
+ * Convert Web Fetch Request to RawContext
+ *
+ * Used by createApp().fetch to handle Fetch API requests.
+ * Extracts method, path, query, headers, and body from Request.
+ *
+ * @example
+ * ```typescript
+ * const request = new Request('http://localhost/users?page=1', {
+ *   method: 'POST',
+ *   body: JSON.stringify({ name: 'Alice' }),
+ * })
+ * const ctx = await requestToRawContext(request)
+ * // ctx.method === 'POST'
+ * // ctx.path === '/users'
+ * // ctx.query === 'page=1'
+ * ```
+ */
+export const requestToRawContext = async (request: Request): Promise<RawContext> => {
+	const url = new URL(request.url)
+	const method = request.method
+	const path = url.pathname
+	const query = url.search.slice(1) // Remove leading '?'
+
+	// Parse headers
+	const headers: Record<string, string> = {}
+	request.headers.forEach((value, key) => {
+		headers[key.toLowerCase()] = value
+	})
+
+	// Read body
+	let body: Buffer
+	if (request.body) {
+		const arrayBuffer = await request.arrayBuffer()
+		body = Buffer.from(arrayBuffer)
+	} else {
+		body = Buffer.alloc(0)
+	}
+
+	return {
+		method,
+		path,
+		query,
+		headers,
+		params: {},
+		body,
+		json: <T>() => {
+			try {
+				return JSON.parse(body.toString()) as T
+			} catch {
+				return {} as T
+			}
+		},
+		raw: body,
+		socket: null as unknown as Socket, // Not available in Fetch API
+	}
+}
+
+/**
+ * Convert ServerResponse to Web Fetch Response
+ *
+ * Used by createApp().fetch to return Fetch API responses.
+ * Handles body conversion for string, Buffer, and streaming bodies.
+ *
+ * @example
+ * ```typescript
+ * const serverResponse = {
+ *   status: 200,
+ *   headers: { 'content-type': 'application/json' },
+ *   body: '{"name":"Alice"}',
+ * }
+ * const response = serverResponseToResponse(serverResponse)
+ * // response.status === 200
+ * // response.headers.get('content-type') === 'application/json'
+ * ```
+ */
+export const serverResponseToResponse = (
+	response: import('@sylphx/gust-core').ServerResponse
+): Response => {
+	// Convert headers
+	const headers = new Headers()
+	if (response.headers) {
+		for (const [key, value] of Object.entries(response.headers)) {
+			if (value !== undefined) {
+				headers.set(key, String(value))
+			}
+		}
+	}
+
+	// Convert body
+	let body: BodyInit | null = null
+	if (response.body !== null && response.body !== undefined) {
+		if (typeof response.body === 'string') {
+			body = response.body
+		} else if (Buffer.isBuffer(response.body)) {
+			body = response.body
+		} else if (response.body instanceof Uint8Array) {
+			body = response.body
+		} else if (isAsyncIterable(response.body)) {
+			// Streaming body - convert to ReadableStream
+			body = asyncIterableToReadableStream(response.body as AsyncIterable<Uint8Array>)
+		} else {
+			body = String(response.body)
+		}
+	}
+
+	return new Response(body, {
+		status: response.status,
+		headers,
+	})
+}
+
+/**
+ * Check if value is an AsyncIterable
+ */
+const isAsyncIterable = (value: unknown): value is AsyncIterable<unknown> => {
+	return value !== null && typeof value === 'object' && Symbol.asyncIterator in value
+}
+
+/**
+ * Convert AsyncIterable to ReadableStream
+ */
+const asyncIterableToReadableStream = (
+	iterable: AsyncIterable<Uint8Array>
+): ReadableStream<Uint8Array> => {
+	const iterator = iterable[Symbol.asyncIterator]()
+
+	return new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			try {
+				const { value, done } = await iterator.next()
+				if (done) {
+					controller.close()
+				} else {
+					controller.enqueue(value)
+				}
+			} catch (error) {
+				controller.error(error)
+			}
+		},
+		cancel() {
+			iterator.return?.()
+		},
+	})
+}

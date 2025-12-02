@@ -16,10 +16,11 @@ import { createServer, type Server as NetServer, type Socket } from 'node:net'
 import { createServer as createTlsServer, type TLSSocket, type Server as TlsServer } from 'node:tls'
 import type { Handler, ServerResponse, WasmCore } from '@sylphx/gust-core'
 import { getWasm, initWasm, isStreamingBody, serverError } from '@sylphx/gust-core'
+import { createApp, type GustApp } from './app'
 import type { Context, RawContext } from './context'
-import { createRawContext, parseHeaders, withApp } from './context'
+import { createRawContext, parseHeaders } from './context'
 import { isNativeAvailable, isTlsAvailable, loadNativeBinding } from './native'
-import type { Route, RouteHandlerFn } from './router'
+import type { Route } from './router'
 
 // Default keep-alive timeout (5 seconds)
 const DEFAULT_KEEP_ALIVE_TIMEOUT = 5000
@@ -114,12 +115,29 @@ export type Middleware<RequiredApp = unknown> = <App extends RequiredApp>(
 
 /**
  * Serve options
+ *
+ * Can provide either:
+ * - `app` - Pre-built GustApp (from createApp())
+ * - `routes` - Routes to build app from (backward compatible)
  */
 export type ServeOptions<App = Record<string, never>> = {
 	readonly port?: number
 	readonly hostname?: string
+	/**
+	 * Pre-built GustApp (from createApp())
+	 *
+	 * When provided, routes/middleware/context are ignored.
+	 * Use this for better separation between app logic and server config.
+	 *
+	 * @example
+	 * ```typescript
+	 * const app = createApp({ routes: [...] })
+	 * await serve({ app, port: 3000 })
+	 * ```
+	 */
+	readonly app?: GustApp<App>
 	/** Routes created with get(), post(), etc. */
-	readonly routes: Route<string, string, App>[]
+	readonly routes?: Route<string, string, App>[]
 	/** Global middleware - wraps the entire router
 	 * Use Middleware (universal) or Middleware<App> (bounded) */
 	readonly middleware?: Middleware<Partial<App>>
@@ -152,108 +170,25 @@ export type Server = {
 }
 
 /**
- * Create handler from routes and optional context provider
- */
-const createHandler = <App>(routes: Route<string, string, App>[]): Handler<Context<App>> => {
-	type WasmRouterType = {
-		insert: (m: string, p: string, id: number) => void
-		find: (
-			m: string,
-			p: string
-		) => { found: boolean; handler_id: number; params: string[]; free: () => void }
-	}
-
-	let wasmRouter: WasmRouterType | null = null
-	const handlers: RouteHandlerFn<App, string>[] = []
-
-	const initRouter = () => {
-		if (wasmRouter) return wasmRouter
-		const wasm = getWasm()
-		wasmRouter = new wasm.WasmRouter() as WasmRouterType
-
-		for (const route of routes) {
-			const handlerId = handlers.length
-			handlers.push(route.handler as RouteHandlerFn<App, string>)
-			wasmRouter.insert(route.method, route.path, handlerId)
-
-			if (route.method === '*') {
-				for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']) {
-					wasmRouter.insert(method, route.path, handlerId)
-				}
-			}
-		}
-		return wasmRouter
-	}
-
-	return async (ctx: Context<App>) => {
-		const r = initRouter()
-		const match = r.find(ctx.method, ctx.path)
-
-		if (!match.found) {
-			match.free()
-			return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not Found' }
-		}
-
-		const h = handlers[match.handler_id]
-		const params: Record<string, string> = {}
-
-		const paramArray = match.params
-		for (let i = 0; i < paramArray.length; i += 2) {
-			const key = paramArray[i]
-			const value = paramArray[i + 1]
-			if (key !== undefined && value !== undefined) {
-				params[key] = value
-			}
-		}
-		match.free()
-
-		if (!h) {
-			return { status: 404, headers: { 'content-type': 'text/plain' }, body: 'Not Found' }
-		}
-
-		// Update params in context
-		const ctxWithParams = { ...ctx, params: { ...ctx.params, ...params } }
-
-		return h({ ctx: ctxWithParams, input: undefined as never })
-	}
-}
-
-/**
- * Create the entry handler that builds Context<App> and routes
- */
-const createEntryHandler = <App>(
-	routes: Route<string, string, App>[],
-	contextProvider?: ContextProvider<App>,
-	middleware?: Middleware
-): Handler<RawContext> => {
-	const routerHandler = createHandler(routes)
-
-	// Wrap with middleware if provided
-	const finalHandler = middleware ? middleware<App>(routerHandler) : routerHandler
-
-	return async (raw: RawContext) => {
-		// Create app context
-		const app = contextProvider ? await contextProvider(raw) : ({} as App)
-		const ctx = withApp(raw, app)
-
-		return finalHandler(ctx)
-	}
-}
-
-/**
  * Start the HTTP/HTTPS server
  *
  * @example
  * ```ts
- * type App = { db: Database }
- * const { get } = createRouter<App>()
- *
+ * // Option 1: Pass routes directly (backward compatible)
  * serve({
  *   routes: [get('/users', ({ ctx }) => json(ctx.app.db.getUsers()))],
  *   context: () => ({ db: createDb() }),
  *   middleware: cors(),
  *   port: 3000,
  * })
+ *
+ * // Option 2: Pass pre-built app (new, recommended)
+ * const app = createApp({
+ *   routes: [...],
+ *   middleware: cors(),
+ *   context: () => ({ db }),
+ * })
+ * serve({ app, port: 3000 })
  * ```
  *
  * Architecture:
@@ -266,7 +201,23 @@ export const serve = async <App = Record<string, never>>(
 	const port = options.port ?? (options.tls ? 443 : 3000)
 	const hostname = options.hostname ?? '0.0.0.0'
 	const useTls = !!options.tls
-	const handler = createEntryHandler(options.routes, options.context, options.middleware)
+
+	// Get handler from app or create from routes
+	let handler: Handler<RawContext>
+	if (options.app) {
+		// Use pre-built app
+		handler = options.app.handle
+	} else if (options.routes) {
+		// Build app from routes (backward compatible)
+		const app = createApp({
+			routes: options.routes,
+			middleware: options.middleware,
+			context: options.context,
+		})
+		handler = app.handle
+	} else {
+		throw new Error('Either app or routes must be provided')
+	}
 
 	// Try native server first (supports both HTTP and HTTPS)
 	if (isNativeAvailable()) {

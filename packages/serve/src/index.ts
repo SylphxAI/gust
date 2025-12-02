@@ -32,6 +32,9 @@ export {
 	text,
 	unauthorized,
 } from '@sylphx/gust-core'
+export type { AppConfig, GustApp } from './app'
+// App Builder (stateless)
+export { createApp } from './app'
 export type { ApiKeyOptions, BasicAuthOptions, BearerAuthOptions, HmacOptions } from './auth'
 // Authentication
 export {
@@ -114,7 +117,15 @@ export type { CompressionOptions } from './compress'
 export { brotli, compress, gzip } from './compress'
 export type { BaseContext, Context, HandlerArgs, RawContext, RouteHandler } from './context'
 // Context
-export { createContext, createRawContext, parseHeaders, withApp, withParams } from './context'
+export {
+	createContext,
+	createRawContext,
+	parseHeaders,
+	requestToRawContext,
+	serverResponseToResponse,
+	withApp,
+	withParams,
+} from './context'
 export type { Cookie, CookieOptions } from './cookie'
 // Cookies
 export {
