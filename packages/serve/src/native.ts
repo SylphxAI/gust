@@ -402,6 +402,34 @@ export interface ResponseData {
 	body: string
 }
 
+/** Route entry for Rust router registration */
+export interface NativeRouteEntry {
+	method: string
+	path: string
+	handler_id: number
+	has_params: boolean
+	has_wildcard: boolean
+}
+
+/** Route manifest for Rust router registration */
+export interface NativeRouteManifest {
+	routes: NativeRouteEntry[]
+	handler_count: number
+}
+
+/** Input for invoke handler callback from Rust */
+export interface NativeInvokeHandlerInput {
+	handler_id: number
+	ctx: {
+		method: string
+		path: string
+		query: string
+		headers: Record<string, string>
+		params: Record<string, string>
+		body: Uint8Array
+	}
+}
+
 export interface NativeServer {
 	addStaticRoute(
 		method: string,
@@ -418,6 +446,14 @@ export interface NativeServer {
 	): void
 	/** Set fallback handler for unmatched routes */
 	setFallback(callback: (ctx: RequestContext) => Promise<ResponseData>): void
+	/** Register routes from GustApp manifest (new route registration pattern) */
+	registerRoutes(manifest: NativeRouteManifest): Promise<void>
+	/** Set invoke handler callback (new route registration pattern) */
+	setInvokeHandler(callback: (input: NativeInvokeHandlerInput) => Promise<ResponseData>): void
+	/** Check if app routes pattern is configured */
+	hasAppRoutes(): boolean
+	/** Clear all app routes (for hot reload) */
+	clearAppRoutes(): Promise<void>
 	/** Enable CORS middleware */
 	enableCors(config: NativeCorsConfig): Promise<void>
 	/** Enable rate limiting middleware */

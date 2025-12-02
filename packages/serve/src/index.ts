@@ -32,7 +32,14 @@ export {
 	text,
 	unauthorized,
 } from '@sylphx/gust-core'
-export type { AppConfig, GustApp } from './app'
+export type {
+	AppConfig,
+	GustApp,
+	InvokeHandlerInput,
+	NativeHandlerContext,
+	RouteEntry,
+	RouteManifest,
+} from './app'
 // App Builder (stateless)
 export { createApp } from './app'
 export type { ApiKeyOptions, BasicAuthOptions, BearerAuthOptions, HmacOptions } from './auth'

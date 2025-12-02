@@ -65,6 +65,72 @@ pub struct ResponseData {
     pub streaming: Option<bool>,
 }
 
+// ============================================================================
+// Route Registration Types (for GustApp integration)
+// ============================================================================
+
+/// Route entry from JS manifest
+/// Matches TypeScript RouteEntry interface in app.ts
+#[napi(object)]
+#[derive(Clone)]
+pub struct RouteEntry {
+    /// HTTP method (GET, POST, etc.) or * for all
+    pub method: String,
+    /// Route path pattern (e.g., /users/:id)
+    pub path: String,
+    /// Handler ID for invokeHandler
+    pub handler_id: u32,
+    /// Whether route has path parameters
+    pub has_params: bool,
+    /// Whether route has wildcard
+    pub has_wildcard: bool,
+}
+
+/// Route manifest from JS
+/// Matches TypeScript RouteManifest interface in app.ts
+#[napi(object)]
+#[derive(Clone)]
+pub struct RouteManifest {
+    /// All route definitions
+    pub routes: Vec<RouteEntry>,
+    /// Total number of handlers
+    pub handler_count: u32,
+}
+
+/// Context passed to invokeHandler
+/// Matches TypeScript NativeHandlerContext interface in app.ts
+#[napi(object)]
+#[derive(Clone)]
+pub struct NativeHandlerContext {
+    /// HTTP method
+    pub method: String,
+    /// Request path
+    pub path: String,
+    /// Query string (without ?)
+    pub query: String,
+    /// Request headers
+    pub headers: HashMap<String, String>,
+    /// Route parameters extracted by Rust router
+    pub params: HashMap<String, String>,
+    /// Request body as bytes
+    pub body: Vec<u8>,
+}
+
+/// Input for invoke handler callback
+/// Wraps handlerId and context for clean JS marshalling
+#[napi(object)]
+#[derive(Clone)]
+pub struct InvokeHandlerInput {
+    /// Handler ID from route manifest
+    pub handler_id: u32,
+    /// Request context with parsed data
+    pub ctx: NativeHandlerContext,
+}
+
+/// Invoke handler callback type
+/// Called with InvokeHandlerInput and returns ResponseData
+type InvokeHandlerCallback = ThreadsafeFunction<InvokeHandlerInput, ErrorStrategy::Fatal>;
+
 /// TLS/HTTPS configuration
 #[napi(object)]
 #[derive(Clone, Default)]
@@ -941,12 +1007,33 @@ impl Clone for DynamicHandler {
     }
 }
 
+/// Invoke handler wrapper (for route registration pattern)
+struct InvokeHandler {
+    callback: InvokeHandlerCallback,
+}
+
+// Safety: InvokeHandlerCallback (ThreadsafeFunction) is designed to be Send + Sync
+unsafe impl Send for InvokeHandler {}
+unsafe impl Sync for InvokeHandler {}
+
+impl Clone for InvokeHandler {
+    fn clone(&self) -> Self {
+        Self {
+            callback: self.callback.clone(),
+        }
+    }
+}
+
 /// Server state shared across all connections
 struct ServerState {
     /// Static routes (pre-rendered responses)
     static_routes: RwLock<Router<StaticResponse>>,
-    /// Dynamic routes (JS handlers)
+    /// Dynamic routes (JS handlers) - legacy pattern
     dynamic_routes: RwLock<Router<DynamicHandler>>,
+    /// App routes (handler ID based) - new pattern from GustApp.manifest
+    app_routes: RwLock<Router<u32>>,
+    /// Invoke handler callback - calls GustApp.invokeHandler(id, ctx)
+    invoke_handler: RwLock<Option<InvokeHandler>>,
     /// Middleware chain
     middleware: RwLock<MiddlewareChain>,
     /// Fallback handler for unmatched routes
@@ -978,6 +1065,8 @@ impl ServerState {
         Self {
             static_routes: RwLock::new(Router::new()),
             dynamic_routes: RwLock::new(Router::new()),
+            app_routes: RwLock::new(Router::new()),
+            invoke_handler: RwLock::new(None),
             middleware: RwLock::new(MiddlewareChain::new()),
             fallback_handler: RwLock::new(None),
             compression: RwLock::new(None),
@@ -1296,6 +1385,81 @@ impl GustServer {
         Ok(())
     }
 
+    // ========================================================================
+    // GustApp Integration (Route Registration Pattern)
+    // ========================================================================
+
+    /// Register routes from GustApp manifest
+    ///
+    /// This enables Rust-side routing with handler ID dispatch.
+    /// Routes are registered in the Rust Radix Trie router.
+    /// When a request matches, `invoke_handler(handler_id, ctx)` is called.
+    ///
+    /// @example
+    /// ```typescript
+    /// const app = createApp({ routes: [...] })
+    /// server.registerRoutes(app.manifest)
+    /// server.setInvokeHandler(app.invokeHandler)
+    /// ```
+    #[napi]
+    pub async fn register_routes(&self, manifest: RouteManifest) -> Result<()> {
+        let mut routes = self.state.app_routes.write().await;
+
+        for entry in manifest.routes {
+            let method = Method::from_str(&entry.method)
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+
+            routes
+                .route(method, &entry.path, entry.handler_id)
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
+    /// Set the invoke handler callback from GustApp
+    ///
+    /// This callback is called when a route matches with:
+    /// - `handlerId`: The handler ID from the route manifest
+    /// - `ctx`: The native handler context with parsed request data
+    ///
+    /// The callback should return a ResponseData (or Promise<ResponseData>).
+    ///
+    /// @example
+    /// ```typescript
+    /// const app = createApp({ routes: [...] })
+    /// server.setInvokeHandler(app.invokeHandler)
+    /// ```
+    #[napi]
+    pub fn set_invoke_handler(&self, handler: JsFunction) -> Result<()> {
+        // Create threadsafe function that accepts (handlerId, context) tuple
+        let tsfn: InvokeHandlerCallback = handler
+            .create_threadsafe_function(0, |ctx| {
+                // ctx.value is (u32, NativeHandlerContext)
+                // We need to convert this to JS arguments
+                Ok(vec![ctx.value])
+            })?;
+
+        let invoke = InvokeHandler { callback: tsfn };
+        *self.state.invoke_handler.blocking_write() = Some(invoke);
+        Ok(())
+    }
+
+    /// Check if app routes pattern is configured
+    /// Returns true if invoke_handler is set
+    #[napi]
+    pub fn has_app_routes(&self) -> bool {
+        self.state.invoke_handler.blocking_read().is_some()
+    }
+
+    /// Clear all app routes (for hot reload)
+    #[napi]
+    pub async fn clear_app_routes(&self) -> Result<()> {
+        let mut routes = self.state.app_routes.write().await;
+        *routes = Router::new();
+        Ok(())
+    }
+
     /// Start the server (non-blocking)
     #[napi]
     pub async fn serve(&self, port: u32) -> Result<()> {
@@ -1605,6 +1769,100 @@ async fn handle_request(
         }
     }
 
+    // FAST PATH 2: Check app routes (GustApp pattern - Rust routing, ID-based dispatch)
+    {
+        let routes = state.app_routes.read().await;
+        if let Some(matched) = routes.match_route(method, path) {
+            let handler_id = matched.value;
+            let params = matched.params.clone();
+            drop(routes); // Release lock early
+
+            // Check if invoke handler is set
+            let invoke = state.invoke_handler.read().await.clone();
+            if let Some(handler) = invoke {
+                // Extract all data from req BEFORE consuming it
+                let method_str_owned = method_str.to_string();
+                let path_owned = path.to_string();
+                let query_owned = req.uri().query().unwrap_or("").to_string();
+
+                // Collect headers
+                let mut headers_map: HashMap<String, String> = HashMap::with_capacity(req.headers().len());
+                for (name, value) in req.headers() {
+                    if let Ok(v) = value.to_str() {
+                        headers_map.insert(name.as_str().to_lowercase(), v.to_string());
+                    }
+                }
+
+                // Check body size limit
+                let max_body_size = state.max_body_size.load(Ordering::Relaxed) as usize;
+                if let Some(content_length) = headers_map.get("content-length") {
+                    if let Ok(len) = content_length.parse::<usize>() {
+                        if len > max_body_size {
+                            return Ok(hyper::Response::builder()
+                                .status(413)
+                                .header("content-type", "text/plain")
+                                .body(Full::new(Bytes::from("Request Entity Too Large")))
+                                .unwrap());
+                        }
+                    }
+                }
+
+                // Read body with timeout (this consumes req)
+                let request_timeout = state.request_timeout_ms.load(Ordering::Relaxed);
+                let body_result = if request_timeout > 0 {
+                    tokio::time::timeout(
+                        Duration::from_millis(request_timeout as u64),
+                        req.collect()
+                    ).await
+                } else {
+                    Ok(req.collect().await)
+                };
+
+                let body_bytes = match body_result {
+                    Ok(Ok(collected)) => {
+                        let bytes = collected.to_bytes();
+                        if bytes.len() > max_body_size {
+                            return Ok(hyper::Response::builder()
+                                .status(413)
+                                .header("content-type", "text/plain")
+                                .body(Full::new(Bytes::from("Request Entity Too Large")))
+                                .unwrap());
+                        }
+                        bytes
+                    },
+                    Ok(Err(_)) => Bytes::new(),
+                    Err(_) => {
+                        return Ok(hyper::Response::builder()
+                            .status(408)
+                            .header("content-type", "text/plain")
+                            .body(Full::new(Bytes::from("Request Timeout")))
+                            .unwrap());
+                    }
+                };
+
+                // Create native handler context
+                let native_ctx = NativeHandlerContext {
+                    method: method_str_owned,
+                    path: path_owned,
+                    query: query_owned,
+                    headers: headers_map,
+                    params,
+                    body: body_bytes.to_vec(),
+                };
+
+                // Create input for invoke handler
+                let input = InvokeHandlerInput {
+                    handler_id,
+                    ctx: native_ctx,
+                };
+
+                // Call invoke handler with input
+                let response = call_invoke_handler(&handler.callback, input).await;
+                return Ok(to_hyper_response(response_data_to_response(response)));
+            }
+        }
+    }
+
     // Check middleware early to know if we need request object
     let middleware = state.middleware.read().await;
     let has_middleware = !middleware.is_empty();
@@ -1843,6 +2101,36 @@ async fn call_js_handler(
 ) -> ResponseData {
     // Use call_async to properly handle Promise returns
     match callback.call_async::<Promise<ResponseData>>(ctx).await {
+        Ok(promise) => {
+            match promise.await {
+                Ok(response) => response,
+                Err(_) => ResponseData {
+                    status: 500,
+                    headers: HashMap::new(),
+                    body: "Internal Server Error".to_string(),
+                    streaming: None,
+                },
+            }
+        }
+        Err(_) => ResponseData {
+            status: 500,
+            headers: HashMap::new(),
+            body: "Internal Server Error".to_string(),
+            streaming: None,
+        },
+    }
+}
+
+/// Call invoke handler (GustApp pattern) and await result
+///
+/// This is the new route registration pattern where Rust routes first,
+/// then calls the JS invokeHandler with handler ID and context.
+async fn call_invoke_handler(
+    callback: &InvokeHandlerCallback,
+    input: InvokeHandlerInput,
+) -> ResponseData {
+    // Use call_async to properly handle Promise returns
+    match callback.call_async::<Promise<ResponseData>>(input).await {
         Ok(promise) => {
             match promise.await {
                 Ok(response) => response,

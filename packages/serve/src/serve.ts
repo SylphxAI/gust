@@ -16,7 +16,7 @@ import { createServer, type Server as NetServer, type Socket } from 'node:net'
 import { createServer as createTlsServer, type TLSSocket, type Server as TlsServer } from 'node:tls'
 import type { Handler, ServerResponse, WasmCore } from '@sylphx/gust-core'
 import { getWasm, initWasm, isStreamingBody, serverError } from '@sylphx/gust-core'
-import { createApp, type GustApp } from './app'
+import { createApp, type GustApp, type InvokeHandlerInput } from './app'
 import type { Context, RawContext } from './context'
 import { createRawContext, parseHeaders } from './context'
 import { isNativeAvailable, isTlsAvailable, loadNativeBinding } from './native'
@@ -245,6 +245,11 @@ export const serve = async <App = Record<string, never>>(
  * - JS handler is called via threadsafe callback for dynamic routes
  * - Middleware (CORS, rate limiting, security) runs in Rust
  * - Supports TLS/HTTPS when compiled with 'tls' feature
+ *
+ * NEW: Route Registration Pattern (when GustApp is provided)
+ * - Routes are registered in Rust Radix Trie router
+ * - Rust routes first, only calls JS for matched routes
+ * - Uses invokeHandler(handlerId, ctx) for minimal JS overhead
  */
 const serveNative = async <App>(
 	options: ServeOptions<App>,
@@ -303,65 +308,123 @@ const serveNative = async <App>(
 			await server.setMaxHeaderSize(options.maxHeaderSize)
 		}
 
-		// Set fallback handler that routes all requests to JS handler
-		// This is the native-first architecture: Rust handles HTTP, JS handles business logic
-		server.setFallback(async (ctx) => {
-			try {
-				// Parse body if present
-				const bodyBuffer = ctx.body ? Buffer.from(ctx.body) : Buffer.alloc(0)
+		// NEW: Route Registration Pattern (when GustApp is provided)
+		// This enables Rust-side routing with minimal JS overhead
+		if (options.app) {
+			// Convert manifest to native format
+			const nativeManifest = {
+				routes: options.app.manifest.routes.map((r) => ({
+					method: r.method,
+					path: r.path,
+					handler_id: r.handlerId,
+					has_params: r.hasParams,
+					has_wildcard: r.hasWildcard,
+				})),
+				handler_count: options.app.manifest.handlerCount,
+			}
 
-				// Create raw context for the handler
-				const rawCtx: RawContext = {
-					method: ctx.method,
-					path: ctx.path,
-					query: ctx.query ?? '',
-					headers: ctx.headers,
-					params: ctx.params,
-					body: bodyBuffer,
-					json: <T>() => {
-						try {
-							return JSON.parse(ctx.body || '{}') as T
-						} catch {
-							return {} as T
+			// Register routes in Rust router
+			await server.registerRoutes(nativeManifest)
+
+			// Set invoke handler callback
+			// Rust will call this with (input: { handler_id, ctx }) for matched routes
+			server.setInvokeHandler(async (input: InvokeHandlerInput) => {
+				try {
+					// biome-ignore lint/style/noNonNullAssertion: app is checked above
+					const response = await options.app!.invokeHandler(input.handler_id, input.ctx)
+
+					// Convert ServerResponse to native format
+					const headers: Record<string, string> = {}
+					if (response.headers) {
+						for (const key in response.headers) {
+							headers[key] = String(response.headers[key])
 						}
-					},
-					raw: bodyBuffer,
-					socket: null as unknown as Socket, // Not available for native
-				}
+					}
 
-				const response = await handler(rawCtx)
+					const body =
+						response.body === null
+							? ''
+							: typeof response.body === 'string'
+								? response.body
+								: Buffer.isBuffer(response.body)
+									? response.body.toString()
+									: String(response.body)
 
-				// Convert ServerResponse to native format
-				const headers: Record<string, string> = {}
-				if (response.headers) {
-					for (const key in response.headers) {
-						headers[key] = String(response.headers[key])
+					return {
+						status: response.status,
+						headers,
+						body,
+					}
+				} catch (err) {
+					options.onError?.(err as Error)
+					return {
+						status: 500,
+						headers: { 'content-type': 'text/plain' },
+						body: 'Internal Server Error',
 					}
 				}
+			})
+		} else {
+			// Legacy: Set fallback handler that routes all requests to JS handler
+			// This is the native-first architecture: Rust handles HTTP, JS handles business logic
+			server.setFallback(async (ctx) => {
+				try {
+					// Parse body if present
+					const bodyBuffer = ctx.body ? Buffer.from(ctx.body) : Buffer.alloc(0)
 
-				const body =
-					response.body === null
-						? ''
-						: typeof response.body === 'string'
-							? response.body
-							: Buffer.isBuffer(response.body)
-								? response.body.toString()
-								: String(response.body)
+					// Create raw context for the handler
+					const rawCtx: RawContext = {
+						method: ctx.method,
+						path: ctx.path,
+						query: ctx.query ?? '',
+						headers: ctx.headers,
+						params: ctx.params,
+						body: bodyBuffer,
+						json: <T>() => {
+							try {
+								return JSON.parse(ctx.body || '{}') as T
+							} catch {
+								return {} as T
+							}
+						},
+						raw: bodyBuffer,
+						socket: null as unknown as Socket, // Not available for native
+					}
 
-				return {
-					status: response.status,
-					headers,
-					body,
+					const response = await handler(rawCtx)
+
+					// Convert ServerResponse to native format
+					const headers: Record<string, string> = {}
+					if (response.headers) {
+						for (const key in response.headers) {
+							headers[key] = String(response.headers[key])
+						}
+					}
+
+					const body =
+						response.body === null
+							? ''
+							: typeof response.body === 'string'
+								? response.body
+								: Buffer.isBuffer(response.body)
+									? response.body.toString()
+									: String(response.body)
+
+					return {
+						status: response.status,
+						headers,
+						body,
+					}
+				} catch (err) {
+					options.onError?.(err as Error)
+					return {
+						status: 500,
+						headers: { 'content-type': 'text/plain' },
+						body: 'Internal Server Error',
+					}
 				}
-			} catch (err) {
-				options.onError?.(err as Error)
-				return {
-					status: 500,
-					headers: { 'content-type': 'text/plain' },
-					body: 'Internal Server Error',
-				}
-			}
-		})
+			})
+		}
 
 		// Start server with hostname (non-blocking)
 		server.serveWithHostname(port, hostname).catch((err) => {
