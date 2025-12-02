@@ -1,0 +1,53 @@
+{
+	"name": "@sylphx/gust-server",
+	"version": "0.1.7",
+	"description": "High-performance Rust-powered HTTP server - 220k+ req/s",
+	"type": "module",
+	"main": "dist/index.js",
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "bunup",
+		"typecheck": "tsc --noEmit",
+		"test": "echo 'Tests run via @sylphx/gust'"
+	},
+	"dependencies": {
+		"@sylphx/gust-app": "workspace:*",
+		"@sylphx/gust-core": "workspace:*"
+	},
+	"optionalDependencies": {
+		"@sylphx/gust-napi": "0.1.7"
+	},
+	"devDependencies": {
+		"@types/node": "^24.10.1",
+		"bunup": "^0.16.10",
+		"typescript": "^5.9.3"
+	},
+	"keywords": [
+		"http",
+		"server",
+		"rust",
+		"native",
+		"high-performance",
+		"bun"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/SylphxAI/gust",
+		"directory": "packages/server"
+	},
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	}
+}

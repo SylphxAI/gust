@@ -1,0 +1,50 @@
+{
+	"name": "@sylphx/gust-app",
+	"version": "0.1.7",
+	"description": "Stateless HTTP application framework - portable across Bun, Deno, Edge, Serverless",
+	"type": "module",
+	"main": "dist/index.js",
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "bunup",
+		"typecheck": "tsc --noEmit",
+		"test": "echo 'Tests run via @sylphx/gust'"
+	},
+	"dependencies": {
+		"@sylphx/gust-core": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/node": "^24.10.1",
+		"bunup": "^0.16.10",
+		"typescript": "^5.9.3"
+	},
+	"keywords": [
+		"http",
+		"app",
+		"framework",
+		"serverless",
+		"edge",
+		"bun",
+		"deno"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/SylphxAI/gust",
+		"directory": "packages/app"
+	},
+	"license": "MIT",
+	"publishConfig": {
+		"access": "public"
+	}
+}

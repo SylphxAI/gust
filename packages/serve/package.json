@@ -1,7 +1,7 @@
 {
 	"name": "@sylphx/gust",
 	"version": "0.1.7",
-	"description": "High-performance WASM-powered HTTP server framework",
+	"description": "High-performance HTTP server framework - stateless app + Rust-powered server",
 	"type": "module",
 	"main": "dist/index.js",
 	"module": "dist/index.js",
@@ -33,11 +33,13 @@
 		"web",
 		"fast",
 		"wasm",
+		"rust",
 		"bun"
 	],
 	"license": "MIT",
 	"dependencies": {
-		"@sylphx/gust-core": "workspace:*"
+		"@sylphx/gust-app": "workspace:*",
+		"@sylphx/gust-server": "workspace:*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.8",
