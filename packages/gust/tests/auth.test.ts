@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
+import type { Context } from '@sylphx/gust'
 import {
 	apiKeyAuth,
 	basicAuth,
@@ -15,8 +16,7 @@ import {
 	simpleApiKey,
 	simpleBasicAuth,
 	verifyHmac,
-} from '../src/auth'
-import type { Context } from '../src/context'
+} from '@sylphx/gust'
 
 // Mock context
 const createMockContext = (overrides?: Partial<Context>): Context =>

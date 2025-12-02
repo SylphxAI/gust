@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { serveStatic } from '../src/static'
+import { serveStatic } from '@sylphx/gust'
 
 // Create mock context
 const createMockContext = (method: string = 'GET', path: string = '/', headers: Record<string, string> = {}): any => ({

@@ -15,10 +15,13 @@
 import { createServer, type Server as NetServer, type Socket } from 'node:net'
 import { createServer as createTlsServer, type TLSSocket, type Server as TlsServer } from 'node:tls'
 import {
+	type Context,
+	type ContextProvider,
 	createApp,
 	createRawContext,
 	type GustApp,
 	type InvokeHandlerInput,
+	type Middleware,
 	parseHeaders,
 	type RawContext,
 	type Route,
@@ -69,54 +72,7 @@ export type TlsOptions = {
 	readonly passphrase?: string
 }
 
-/**
- * Context provider function - creates app context for each request
- * Can be sync (static context) or async (per-request context)
- */
-export type ContextProvider<App> = (raw: RawContext) => App | Promise<App>
-
-/**
- * Middleware type - polymorphic over App
- *
- * Middleware works with any App type, making it usable as both
- * global middleware and route-level middleware.
- *
- * @example
- * ```typescript
- * // Middleware that works with any App
- * const cors = (options?: CorsOptions): Middleware =>
- *   <App>(handler: Handler<Context<App>>) =>
- *     async (ctx: Context<App>) => {
- *       // Add CORS headers
- *       const res = await handler(ctx)
- *       return { ...res, headers: { ...res.headers, ...corsHeaders } }
- *     }
- *
- * // Usage - no type annotations needed
- * serve({
- *   middleware: cors(),
- *   routes: [...]
- * })
- * ```
- */
-/**
- * Middleware with bounded polymorphism
- *
- * - `Middleware` = `Middleware<unknown>` = universal, works with any App
- * - `Middleware<R>` = bounded, requires App extends R
- *
- * @example
- * ```typescript
- * // Universal middleware - no App requirements
- * const cors = (): Middleware => ...
- *
- * // Bounded middleware - requires App with userId
- * const rateLimit = <App extends { userId: string }>(): Middleware<App> => ...
- * ```
- */
-export type Middleware<RequiredApp = unknown> = <App extends RequiredApp>(
-	handler: Handler<Context<App>>
-) => Handler<Context<App>>
+// ContextProvider and Middleware imported from @sylphx/gust-app
 
 /**
  * Serve options
@@ -393,7 +349,7 @@ const serveNative = async <App>(
 							}
 						},
 						raw: bodyBuffer,
-						socket: null as unknown as Socket, // Not available for native
+						socket: null, // Not available for native
 					}
 
 					const response = await handler(rawCtx)

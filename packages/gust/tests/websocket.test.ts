@@ -11,7 +11,7 @@ import {
 	upgradeToWebSocket,
 	WebSocket,
 	websocket,
-} from '../src/websocket'
+} from '@sylphx/gust'
 
 // Mock socket for testing
 class MockSocket extends EventEmitter {

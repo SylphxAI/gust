@@ -14,7 +14,7 @@ import {
 	parseMultipart,
 	parseQuery,
 	stringifyQuery,
-} from '../src/body'
+} from '@sylphx/gust'
 
 describe('Body Parsing', () => {
 	describe('parseQuery', () => {

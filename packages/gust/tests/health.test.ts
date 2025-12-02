@@ -17,7 +17,7 @@ import {
 	readiness,
 	runHealthChecks,
 	startup,
-} from '../src/health'
+} from '@sylphx/gust'
 
 // Mock context
 const createMockContext = (): any => ({

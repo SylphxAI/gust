@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'bun:test'
 import { EventEmitter } from 'node:events'
-import { createJsonStream, createStream, StreamWriter, streamFrom } from '../src/stream'
+import { createJsonStream, createStream, StreamWriter, streamFrom } from '@sylphx/gust'
 
 // Mock socket for testing
 class MockSocket extends EventEmitter {

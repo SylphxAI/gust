@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { acceptsRange, contentRange, getRange, isRangeSatisfiable, parseRange } from '../src/range'
+import { acceptsRange, contentRange, getRange, isRangeSatisfiable, parseRange } from '@sylphx/gust'
 
 // Mock context factory
 const createMockContext = (headers: Record<string, string> = {}): any => ({

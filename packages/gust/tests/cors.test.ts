@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'bun:test'
+import { cors, simpleCors } from '@sylphx/gust'
 import { text } from '@sylphx/gust-core'
-import { cors, simpleCors } from '../src/cors'
 
 const createMockContext = (method: string, headers: Record<string, string> = {}): any => ({
 	method,

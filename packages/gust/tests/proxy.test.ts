@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'bun:test'
+import { getClientIp, getProxyInfo, proxy, trustFirstProxy, trustLocalProxy } from '@sylphx/gust'
 import { text } from '@sylphx/gust-core'
-import { getClientIp, getProxyInfo, proxy, trustFirstProxy, trustLocalProxy } from '../src/proxy'
 
 const createMockContext = (headers: Record<string, string> = {}, socketIp = '127.0.0.1'): any => ({
 	method: 'GET',

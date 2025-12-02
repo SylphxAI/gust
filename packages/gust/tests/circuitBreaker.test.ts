@@ -3,7 +3,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { bulkhead, CircuitBreaker, circuitBreaker, getCircuitBreaker, withCircuitBreaker } from '../src/circuitBreaker'
+import { bulkhead, CircuitBreaker, circuitBreaker, getCircuitBreaker, withCircuitBreaker } from '@sylphx/gust'
 
 // Mock context factory
 const createMockContext = (): any => ({

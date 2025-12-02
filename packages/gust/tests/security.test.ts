@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'bun:test'
+import { apiSecurity, security, strictSecurity } from '@sylphx/gust'
 import { text } from '@sylphx/gust-core'
-import { apiSecurity, security, strictSecurity } from '../src/security'
 
 const createMockContext = (): any => ({
 	method: 'GET',

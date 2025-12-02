@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import type { Context } from '../src/context'
+import type { Context } from '@sylphx/gust'
 import {
 	array,
 	boolean,
@@ -22,7 +22,7 @@ import {
 	validateBody,
 	validateQuery,
 	validateSchema,
-} from '../src/validate'
+} from '@sylphx/gust'
 
 // Mock context helper
 const createMockContext = (overrides?: Partial<Context>): Context => ({

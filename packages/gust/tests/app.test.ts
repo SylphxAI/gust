@@ -5,8 +5,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { createApp } from '../src/app'
-import { get, post } from '../src/router'
+import { createApp, get, post } from '@sylphx/gust'
 
 // Simple response helpers for testing (avoid importing from core which may not be built)
 const json = <T>(data: T) => ({

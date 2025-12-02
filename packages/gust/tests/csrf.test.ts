@@ -12,7 +12,7 @@ import {
 	generateCsrfToken,
 	getCsrfToken,
 	verifyCsrfToken,
-} from '../src/csrf'
+} from '@sylphx/gust'
 
 // Mock context factory
 const createMockContext = (

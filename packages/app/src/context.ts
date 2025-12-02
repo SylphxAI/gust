@@ -36,7 +36,7 @@ export type Context<App = Record<string, never>> = {
 	readonly body: Buffer
 	readonly json: <T>() => T
 	readonly raw: Buffer
-	readonly socket: Socket
+	readonly socket: Socket | null
 	readonly app: App
 	/**
 	 * Original Fetch Request (available when using app.fetch)
@@ -96,7 +96,7 @@ export type RawContext = Omit<Context<never>, 'app'> & {
  * Returns RawContext (without app) - app is added by serve()
  */
 export const createRawContext = (
-	socket: Socket,
+	socket: Socket | null,
 	raw: Buffer,
 	parsed: ParseResult,
 	headers: Record<string, string>,
@@ -241,7 +241,7 @@ export const requestToRawContext = async (request: Request): Promise<RawContext>
 			}
 		},
 		raw: body,
-		socket: null as unknown as Socket, // Not available in Fetch API
+		socket: null, // Not available in Fetch API
 		request, // Store original request for delegation to other handlers
 	}
 }

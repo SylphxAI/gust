@@ -3,15 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import {
-	deleteCookie,
-	getCookie,
-	getCookies,
-	parseCookies,
-	serializeCookie,
-	setCookie,
-	setCookies,
-} from '../src/cookie'
+import { deleteCookie, getCookie, getCookies, parseCookies, serializeCookie, setCookie, setCookies } from '@sylphx/gust'
 
 describe('Cookie', () => {
 	describe('parseCookies', () => {

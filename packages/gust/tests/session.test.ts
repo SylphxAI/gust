@@ -3,8 +3,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { flash, generateSessionId, getSession, MemoryStore, session } from '@sylphx/gust'
 import { text } from '@sylphx/gust-core'
-import { flash, generateSessionId, getSession, MemoryStore, session } from '../src/session'
 
 const createMockContext = (cookies: Record<string, string> = {}): any => {
 	const cookieHeader = Object.entries(cookies)

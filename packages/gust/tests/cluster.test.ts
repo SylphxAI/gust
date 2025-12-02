@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { ClusterManager, getClusterInfo, isCluster, isPrimary, isWorker, stickySession } from '../src/cluster'
+import { ClusterManager, getClusterInfo, isCluster, isPrimary, isWorker, stickySession } from '@sylphx/gust'
 
 describe('Cluster', () => {
 	describe('getClusterInfo', () => {

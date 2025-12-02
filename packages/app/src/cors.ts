@@ -6,7 +6,7 @@
 import type { Handler, ServerResponse } from '@sylphx/gust-core'
 import { response } from '@sylphx/gust-core'
 import type { Context } from './context'
-import type { Middleware } from './serve'
+import type { Middleware } from './types'
 
 export type CorsOptions = {
 	/** Allowed origins (string, array, or function) */

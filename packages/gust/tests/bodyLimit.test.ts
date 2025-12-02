@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'bun:test'
+import { bodyLimit, formatSize, parseSize } from '@sylphx/gust'
 import { text } from '@sylphx/gust-core'
-import { bodyLimit, formatSize, parseSize } from '../src/bodyLimit'
 
 const createMockContext = (
 	method: string = 'POST',

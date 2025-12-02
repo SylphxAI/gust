@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { createJwt, decodeJwt, getJwtPayload, isJwtExpired, jwtAuth, optionalJwt, verifyJwt } from '../src/jwt'
+import { createJwt, decodeJwt, getJwtPayload, isJwtExpired, jwtAuth, optionalJwt, verifyJwt } from '@sylphx/gust'
 
 // Mock context
 const createMockContext = (

@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'bun:test'
 import { brotliCompressSync, brotliDecompressSync, deflateSync, gunzipSync, gzipSync, inflateSync } from 'node:zlib'
-import { brotli, compress, gzip } from '../src/compress'
+import { brotli, compress, gzip } from '@sylphx/gust'
 
 const createMockContext = (
 	acceptEncoding: string = 'gzip, deflate, br',

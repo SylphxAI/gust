@@ -5,7 +5,7 @@
 
 import type { Handler, ServerResponse } from '@sylphx/gust-core'
 import type { Context } from './context'
-import type { Middleware } from './serve'
+import type { Middleware } from './types'
 
 export type SecurityOptions = {
 	/** Content Security Policy */

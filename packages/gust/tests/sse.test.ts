@@ -20,7 +20,7 @@ import {
 	sseRaw,
 	sseStream,
 	textStream,
-} from '../src/sse'
+} from '@sylphx/gust'
 
 // Mock socket for testing
 class MockSocket extends EventEmitter {
@@ -605,7 +605,7 @@ describe('Server-Sent Events', () => {
 			expect(response.status).toBe(200)
 			expect(response.headers['content-type']).toBe('text/event-stream')
 			expect(response.headers['cache-control']).toBe('no-cache')
-			expect(response.headers['connection']).toBe('keep-alive')
+			expect(response.headers.connection).toBe('keep-alive')
 			expect(response.headers['x-accel-buffering']).toBe('no')
 		})
 

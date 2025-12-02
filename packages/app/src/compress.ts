@@ -6,7 +6,7 @@
 import { brotliCompressSync, constants, deflateSync, gzipSync } from 'node:zlib'
 import type { Handler, ServerResponse } from '@sylphx/gust-core'
 import type { Context } from './context'
-import type { Middleware } from './serve'
+import type { Middleware } from './types'
 
 export type CompressionOptions = {
 	/** Minimum size to compress (default: 1024 bytes) */

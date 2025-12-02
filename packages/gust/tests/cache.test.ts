@@ -3,6 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import type { Context } from '@sylphx/gust'
 import {
 	cache,
 	defaultCacheKey,
@@ -12,8 +13,7 @@ import {
 	MemoryCache,
 	noCache,
 	varyingCacheKey,
-} from '../src/cache'
-import type { Context } from '../src/context'
+} from '@sylphx/gust'
 
 // Mock context
 const createMockContext = (overrides?: Partial<Context>): Context =>

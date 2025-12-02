@@ -31,7 +31,8 @@ import {
 	withApp,
 } from './context'
 import type { Route, RouteHandlerFn } from './router'
-import type { ContextProvider, Middleware } from './serve'
+import type { ContextProvider, Middleware } from './types'
+import { WILDCARD_METHODS } from './types'
 
 // ============================================================================
 // Response Normalization
@@ -66,6 +67,7 @@ const normalizeResponse = async (
  * Enables direct usage: `all('/graphql', yoga.fetch)`
  */
 const callHandler = async (
+	// biome-ignore lint/complexity/noBannedTypes: Handler can be either Gust-style or Fetch-style function
 	handler: Function,
 	ctx: Context<unknown>,
 	input: unknown
@@ -279,7 +281,7 @@ const createRouterHandler = <App>(
 
 			// Wildcard method - register for all HTTP methods
 			if (route.method === '*') {
-				for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']) {
+				for (const method of WILDCARD_METHODS) {
 					wasmRouter.insert(method, route.path, handlerId)
 				}
 			}
@@ -370,7 +372,7 @@ const buildManifest = <App>(routes: Route<string, string, App>[]): RouteManifest
 
 		// Wildcard method - register for all HTTP methods
 		if (route.method === '*') {
-			for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS']) {
+			for (const method of WILDCARD_METHODS) {
 				entries.push({
 					method,
 					path: route.path,

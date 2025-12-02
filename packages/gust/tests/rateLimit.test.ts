@@ -3,8 +3,8 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import type { Context } from '../src/context'
-import { type RateLimitStore2, rateLimit, rateLimitWithStore } from '../src/rateLimit'
+import type { Context } from '@sylphx/gust'
+import { type RateLimitStore2, rateLimit, rateLimitWithStore } from '@sylphx/gust'
 
 // Mock context factory
 const createMockContext = (overrides?: Partial<Context>): Context =>

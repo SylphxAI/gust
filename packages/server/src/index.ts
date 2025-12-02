@@ -18,14 +18,14 @@
  */
 
 // Re-export app types needed for serve options
-export type { GustApp } from '@sylphx/gust-app'
+export type { ContextProvider, GustApp, Middleware } from '@sylphx/gust-app'
 export type { Handler, ServerResponse } from '@sylphx/gust-core'
 
 // ============================================================================
 // Server
 // ============================================================================
 
-export type { ContextProvider, Middleware, ServeOptions, Server, TlsOptions } from './serve'
+export type { ServeOptions, Server, TlsOptions } from './serve'
 export { serve } from './serve'
 
 // ============================================================================

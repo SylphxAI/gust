@@ -12,7 +12,7 @@ import {
 	MetricsCollector,
 	parseTraceparent,
 	parseTracestate,
-} from '../src/otel'
+} from '@sylphx/gust'
 
 describe('OpenTelemetry', () => {
 	describe('generateTraceId', () => {

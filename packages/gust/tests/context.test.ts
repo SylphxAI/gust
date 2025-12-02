@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { createContext, parseHeaders, withParams } from '../src/context'
+import { createContext, parseHeaders, withParams } from '@sylphx/gust'
 
 // Mock socket
 const createMockSocket = (): any => ({

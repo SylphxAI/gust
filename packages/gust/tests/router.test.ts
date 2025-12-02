@@ -4,8 +4,8 @@
  */
 
 import { describe, expect, it } from 'bun:test'
+import { all, createRouter, del, get, head, options, patch, post, put, routes } from '@sylphx/gust'
 import { json, text } from '@sylphx/gust-core'
-import { all, createRouter, del, get, head, options, patch, post, put, routes } from '../src/router'
 
 describe('Router', () => {
 	describe('route definitions', () => {
@@ -200,7 +200,7 @@ describe('Router', () => {
 			const { get: typedGet, post: typedPost } = createRouter<{ db: string }>()
 
 			const users = typedGet('/users', ({ ctx }) => json({ db: ctx.app.db }))
-			const create = typedPost('/users', ({ ctx }) => json({ created: true }))
+			const create = typedPost('/users', () => json({ created: true }))
 
 			expect(users.method).toBe('GET')
 			expect(users.path).toBe('/users')

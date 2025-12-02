@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'bun:test'
-import { getAlpnProtocol, isHttp2, preload, preloadHint } from '../src/http2'
+import { getAlpnProtocol, isHttp2, preload, preloadHint } from '@sylphx/gust'
 
 describe('HTTP/2', () => {
 	describe('preloadHint', () => {
