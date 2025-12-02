@@ -32,39 +32,50 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        @sylphx/gust                         │
-├─────────────────────────────────────────────────────────────┤
-│  TypeScript API: serve(), router(), middleware, Context     │
-├─────────────────────────────────────────────────────────────┤
-│                    Runtime Detection                        │
-├──────────────────────────┬──────────────────────────────────┤
-│   Native (Rust/napi-rs)  │      WASM Fallback               │
-│   • io_uring on Linux    │      • Browser compatible        │
-│   • Multi-core workers   │      • Universal runtime         │
-│   • 215K+ req/s Node.js  │      • HTTP parser + router      │
-└──────────────────────────┴──────────────────────────────────┘
+│                        @sylphx/gust                          │
+│                    (main package)                            │
+├─────────────────────────┬───────────────────────────────────┤
+│    @sylphx/gust-app     │       @sylphx/gust-server         │
+│   Stateless framework   │      Rust HTTP server             │
+│   • createApp()         │      • serve()                    │
+│   • Routes, middleware  │      • Cluster, HTTP/2            │
+│   • WASM router         │      • WebSocket, SSE             │
+│   • Portable            │      • Native acceleration        │
+├─────────────────────────┴───────────────────────────────────┤
+│                    @sylphx/gust-core                         │
+│              WASM Router • Response Helpers                  │
+├─────────────────────────┬───────────────────────────────────┤
+│     Native (Rust)       │          WASM Fallback            │
+│   hyper + tokio         │       Universal runtime           │
+│   napi-rs bindings      │       HTTP parser + router        │
+│   io_uring on Linux     │                                   │
+│   215K+ req/s           │                                   │
+└─────────────────────────┴───────────────────────────────────┘
 ```
 
-**Two-tier architecture:**
-1. **Native tier** (Rust + napi-rs): Maximum performance on Node.js with io_uring support on Linux
-2. **WASM tier**: Cross-platform fallback with WASM HTTP parser and Radix Trie router
+**Modular design:**
+- **@sylphx/gust** - Main package, re-exports everything
+- **@sylphx/gust-app** - Portable app framework (serverless, edge, any runtime)
+- **@sylphx/gust-server** - Native Rust server (maximum performance)
+- **@sylphx/gust-core** - Core WASM runtime and utilities
 
 ## Packages
 
 | Package | Description | Size |
 |---------|-------------|------|
-| [@sylphx/gust](./packages/serve) | Full-featured HTTP server framework | ~200KB |
-| [@sylphx/gust-core](./packages/core) | Core WASM runtime and response utilities | ~4KB |
+| [@sylphx/gust](./packages/serve) | Main package (re-exports both) | ~87 B |
+| [@sylphx/gust-app](./packages/app) | Stateless app framework | 82 KB |
+| [@sylphx/gust-server](./packages/server) | Rust-powered HTTP server | 73 KB |
+| [@sylphx/gust-core](./packages/core) | Core WASM runtime | ~4 KB |
 
 ## Features
 
-- 🚀 **Native Performance** - Rust-powered with io_uring on Linux, multi-core workers
-- 🌐 **Universal** - Works on Bun, Node.js, and browsers (WASM fallback)
-- 🔒 **Security** - Built-in CORS, CSRF, rate limiting, JWT auth
-- 📦 **Zero config** - Sensible defaults, works out of the box
-- 🎯 **Type-safe** - Full TypeScript support with path param inference
-- ⚡ **Streaming** - SSE, WebSocket, range requests for media
-- 🏥 **Production-ready** - Health checks, graceful shutdown, OpenTelemetry
+- **Native Performance** - Rust-powered with io_uring on Linux, multi-core workers
+- **Portable Apps** - Same code on Bun, Deno, Cloudflare Workers, AWS Lambda
+- **Type-safe** - Full TypeScript support with path param inference
+- **Batteries included** - 20+ middleware (auth, validation, rate limiting, etc.)
+- **Streaming** - SSE, WebSocket, range requests for media
+- **Production-ready** - Health checks, graceful shutdown, OpenTelemetry
 
 ## Quick Start
 
@@ -75,33 +86,72 @@ npm install @sylphx/gust
 ```
 
 ```typescript
-import { serve, router, get, json, compose, cors, rateLimit } from '@sylphx/gust'
+import { createApp, serve, get, json, cors, rateLimit, compose } from '@sylphx/gust'
 
-// Define routes
-const home = get('/', () => json({ message: 'Hello World!' }))
-const user = get('/users/:id', (ctx) => json({ id: ctx.params.id }))
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello World!' })),
+    get('/users/:id', ({ ctx }) => json({ id: ctx.params.id })),
+  ],
+  middleware: compose(
+    cors(),
+    rateLimit({ max: 100, window: 60000 }),
+  ),
+})
 
-// Create router with named routes
-const app = router({ home, user })
+await serve({ app, port: 3000 })
+```
 
-// Type-safe URL generation
-app.url.home()           // "/"
-app.url.user({ id: 42 }) // "/users/42"
+## Usage Patterns
 
-// Apply middleware and serve
-const handler = compose(
-  cors(),
-  rateLimit({ max: 100, window: 60000 }),
-  app.handler
-)
+### Full Server (recommended)
 
-serve({ port: 3000, fetch: handler })
+```typescript
+import { createApp, serve, get, json } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [get('/', () => json({ hello: 'world' }))],
+})
+
+await serve({ app, port: 3000 })
+```
+
+### Portable App Only
+
+For serverless/edge deployments:
+
+```typescript
+import { createApp, get, json } from '@sylphx/gust-app'
+
+const app = createApp({
+  routes: [get('/', () => json({ hello: 'world' }))],
+})
+
+// Use with any runtime
+Bun.serve({ fetch: app.fetch })
+Deno.serve(app.fetch)
+export default { fetch: app.fetch }  // Cloudflare Workers
+```
+
+### Server Features Only
+
+```typescript
+import { serve, websocket, clusterServe } from '@sylphx/gust-server'
+
+// WebSocket
+serve({ port: 3000, fetch: websocket({ ... }) })
+
+// Cluster mode
+clusterServe({ app, workers: 4 })
 ```
 
 ## Documentation
 
-See individual package READMEs:
+See individual package READMEs for detailed API:
+
 - [@sylphx/gust documentation](./packages/serve/README.md)
+- [@sylphx/gust-app documentation](./packages/app/README.md) - Routes, middleware, validation
+- [@sylphx/gust-server documentation](./packages/server/README.md) - Server, WebSocket, SSE, streaming
 - [@sylphx/gust-core documentation](./packages/core/README.md)
 
 ## Development
@@ -112,6 +162,9 @@ bun install
 
 # Run tests
 bun test
+
+# Build all packages
+bun run build
 
 # Build native bindings
 cd crates/gust-napi && bun run build
@@ -126,4 +179,4 @@ MIT
 
 ---
 
-✨ Powered by [Sylphx](https://github.com/SylphxAI)
+Built with [Sylphx](https://github.com/SylphxAI) | [@sylphx/biome-config](https://github.com/SylphxAI/biome-config) | [@sylphx/bump](https://github.com/SylphxAI/bump) | [@sylphx/doctor](https://github.com/SylphxAI/doctor)
