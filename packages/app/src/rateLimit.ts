@@ -107,7 +107,7 @@ const getClientIp = (ctx: Context<unknown>): string => {
 	}
 
 	// Fall back to socket remote address
-	return ctx.socket.remoteAddress || 'unknown'
+	return ctx.socket?.remoteAddress || 'unknown'
 }
 
 /**

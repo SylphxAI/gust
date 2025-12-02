@@ -45,6 +45,8 @@ export type SessionStore = {
 	destroy: (id: string) => Promise<void>
 	/** Touch session (update expiry) */
 	touch: (id: string, maxAge: number) => Promise<void>
+	/** Close and cleanup resources (intervals, connections) */
+	close?: () => void
 }
 
 export type SessionOptions = {
@@ -382,5 +384,26 @@ export const flash = <T = string>(ctx: Context, key: string, value?: T): T | T[]
 			delete sess.data[flashKey]
 		}
 		return messages
+	}
+}
+
+// ============================================================================
+// Cleanup Utilities
+// ============================================================================
+
+/**
+ * Get the default session store instance
+ * Useful for monitoring, testing, or explicit cleanup
+ */
+export const getDefaultSessionStore = (): MemoryStore | null => defaultStore
+
+/**
+ * Close and cleanup the default session store
+ * Call this on server shutdown to prevent memory leaks
+ */
+export const closeSessionStore = (): void => {
+	if (defaultStore) {
+		defaultStore.close()
+		defaultStore = null
 	}
 }

@@ -164,8 +164,10 @@ export {
 export type { CacheEntry, CacheOptions, CacheStore } from './cache'
 export {
 	cache,
+	closeCacheStore,
 	defaultCacheKey,
 	etag,
+	getDefaultCacheStore,
 	invalidateCache,
 	LRUCache,
 	MemoryCache,
@@ -245,8 +247,10 @@ export { apiSecurity, security, strictSecurity } from './security'
 // Session
 export type { Session, SessionData, SessionOptions, SessionStore } from './session'
 export {
+	closeSessionStore,
 	flash,
 	generateSessionId,
+	getDefaultSessionStore,
 	getSession,
 	MemoryStore,
 	session,
@@ -311,3 +315,28 @@ export {
 	wasmGenerateWebSocketAccept,
 	wasmParseTraceparent,
 } from './wasm-loader'
+
+// ============================================================================
+// Global Cleanup
+// ============================================================================
+
+import { closeCacheStore as _closeCacheStore } from './cache'
+import { closeSessionStore as _closeSessionStore } from './session'
+
+/**
+ * Close all default stores and cleanup resources
+ * Call this on server shutdown to prevent memory leaks
+ *
+ * @example
+ * ```typescript
+ * // On server shutdown
+ * process.on('SIGTERM', () => {
+ *   server.close()
+ *   cleanup()
+ * })
+ * ```
+ */
+export const cleanup = (): void => {
+	_closeCacheStore()
+	_closeSessionStore()
+}

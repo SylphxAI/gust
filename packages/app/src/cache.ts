@@ -35,6 +35,8 @@ export type CacheStore = {
 	deleteByTag?: (tag: string) => Promise<void>
 	/** Clear all entries */
 	clear: () => Promise<void>
+	/** Close and cleanup resources (intervals, connections) */
+	close?: () => void
 }
 
 export type CacheOptions = {
@@ -450,5 +452,26 @@ export const etag = (): Wrapper<Context> => {
 				},
 			}
 		}
+	}
+}
+
+// ============================================================================
+// Cleanup Utilities
+// ============================================================================
+
+/**
+ * Get the default cache store instance
+ * Useful for monitoring, testing, or explicit cleanup
+ */
+export const getDefaultCacheStore = (): MemoryCache | null => defaultStore
+
+/**
+ * Close and cleanup the default cache store
+ * Call this on server shutdown to prevent memory leaks
+ */
+export const closeCacheStore = (): void => {
+	if (defaultStore) {
+		defaultStore.close()
+		defaultStore = null
 	}
 }
