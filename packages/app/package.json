@@ -17,7 +17,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "bunup",
+		"build": "bunup && cp -r src/wasm dist/",
 		"typecheck": "tsc --noEmit",
 		"test": "echo 'Tests run via @sylphx/gust'"
 	},

@@ -381,7 +381,7 @@ export const validate = (options: ValidateOptions): Wrapper<Context> => {
 	const { body: bodySchema, query: querySchema, params: paramsSchema, onError } = options
 
 	const errorHandler =
-		onError ?? ((errors) => validationError('Validation failed', errors))
+		onError ?? ((errors) => validationError('Validation Error', errors))
 
 	return (handler: Handler<Context>): Handler<Context> => {
 		return async (ctx: Context): Promise<ServerResponse> => {
