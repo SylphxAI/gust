@@ -4,7 +4,7 @@
  */
 
 import type { Handler, ServerResponse } from '@sylphx/gust-core'
-import { json } from '@sylphx/gust-core'
+import { tooManyRequests } from '@sylphx/gust-core'
 import type { Context } from './context'
 import type { Middleware } from './types'
 
@@ -230,9 +230,7 @@ export const rateLimit = <RequiredApp = unknown>(
 
 			if (!check.allowed) {
 				// Rate limited
-				const limitedResponse = onLimitReached
-					? onLimitReached(ctx)
-					: json({ error: 'Too Many Requests' }, { status: 429 })
+				const limitedResponse = onLimitReached ? onLimitReached(ctx) : tooManyRequests()
 
 				if (headers) {
 					return {
@@ -301,9 +299,7 @@ export const rateLimitWithStore = <RequiredApp = unknown>(
 			const remaining = Math.max(0, max - count)
 
 			if (count > max) {
-				const limitedResponse = onLimitReached
-					? onLimitReached(ctx)
-					: json({ error: 'Too Many Requests' }, { status: 429 })
+				const limitedResponse = onLimitReached ? onLimitReached(ctx) : tooManyRequests()
 
 				if (headers) {
 					return {

@@ -28,6 +28,7 @@
 // ============================================================================
 
 export type {
+	ErrorResponseBody,
 	Handler,
 	ResponseBody,
 	ServerResponse,
@@ -37,6 +38,7 @@ export type {
 export {
 	badRequest,
 	compose,
+	errorResponse,
 	forbidden,
 	getWasm,
 	html,
@@ -45,12 +47,15 @@ export {
 	isWasmReady,
 	json,
 	notFound,
+	payloadTooLarge,
 	pipe,
 	redirect,
 	response,
 	serverError,
 	text,
+	tooManyRequests,
 	unauthorized,
+	validationError,
 } from '@sylphx/gust-core'
 
 // ============================================================================

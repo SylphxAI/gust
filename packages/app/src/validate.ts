@@ -4,7 +4,7 @@
  */
 
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import { response } from '@sylphx/gust-core'
+import { validationError } from '@sylphx/gust-core'
 import { parseFormBody, parseJsonBody, parseQuery } from './body'
 import type { Context } from './context'
 
@@ -380,19 +380,8 @@ export const getValidatedQuery = <T = Record<string, string>>(ctx: Context): T |
 export const validate = (options: ValidateOptions): Wrapper<Context> => {
 	const { body: bodySchema, query: querySchema, params: paramsSchema, onError } = options
 
-	const errorResponse =
-		onError ??
-		((errors) =>
-			response(
-				JSON.stringify({
-					error: 'Validation Error',
-					details: errors,
-				}),
-				{
-					status: 400,
-					headers: { 'content-type': 'application/json' },
-				}
-			))
+	const errorHandler =
+		onError ?? ((errors) => validationError('Validation failed', errors))
 
 	return (handler: Handler<Context>): Handler<Context> => {
 		return async (ctx: Context): Promise<ServerResponse> => {
@@ -449,7 +438,7 @@ export const validate = (options: ValidateOptions): Wrapper<Context> => {
 
 			// Return errors if any
 			if (allErrors.length > 0) {
-				return errorResponse(allErrors)
+				return errorHandler(allErrors)
 			}
 
 			// Store validated data

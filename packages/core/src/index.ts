@@ -22,18 +22,22 @@ export {
 	MethodNames,
 	Methods,
 } from './core'
-export type { ResponseBody, ServerResponse } from './response'
+export type { ErrorResponseBody, ResponseBody, ServerResponse } from './response'
 // Response helpers (pure, no I/O)
 export {
 	badRequest,
+	errorResponse,
 	forbidden,
 	html,
 	isStreamingBody,
 	json,
 	notFound,
+	payloadTooLarge,
 	redirect,
 	response,
 	serverError,
 	text,
+	tooManyRequests,
 	unauthorized,
+	validationError,
 } from './response'

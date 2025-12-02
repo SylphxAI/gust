@@ -4,7 +4,7 @@
  */
 
 import type { Handler, ServerResponse, Wrapper } from '@sylphx/gust-core'
-import { response } from '@sylphx/gust-core'
+import { payloadTooLarge } from '@sylphx/gust-core'
 import type { Context } from './context'
 
 export type BodyLimitOptions = {
@@ -61,17 +61,10 @@ export const bodyLimit = (options: BodyLimitOptions = {}): Wrapper<Context> => {
 	const onLimit =
 		options.onLimit ??
 		((_, size) =>
-			response(
-				JSON.stringify({
-					error: 'Payload Too Large',
-					message: `Body exceeds ${formatSize(maxSize)} limit`,
-					received: formatSize(size),
-				}),
-				{
-					status: 413,
-					headers: { 'content-type': 'application/json' },
-				}
-			))
+			payloadTooLarge(`Body exceeds ${formatSize(maxSize)} limit`, {
+				limit: formatSize(maxSize),
+				received: formatSize(size),
+			}))
 
 	return (handler: Handler<Context>): Handler<Context> => {
 		return async (ctx: Context): Promise<ServerResponse> => {

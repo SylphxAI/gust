@@ -81,18 +81,63 @@ export const redirect = (
 	body: null,
 })
 
-// Error responses
-export const notFound = (message = 'Not Found'): ServerResponse =>
-	json({ error: message }, { status: 404 })
+// ============================================================================
+// Error Response Types
+// ============================================================================
 
-export const badRequest = (message = 'Bad Request'): ServerResponse =>
-	json({ error: message }, { status: 400 })
+/**
+ * Standard error response body
+ * Use this format for all error responses to ensure consistency
+ */
+export type ErrorResponseBody = {
+	/** Human-readable error message (backwards compatible) */
+	readonly error: string
+	/** Programmatic error code (e.g., "NOT_FOUND", "VALIDATION_ERROR") */
+	readonly code?: string
+	/** Additional error details (validation errors, debug info, etc.) */
+	readonly details?: unknown
+}
+
+/**
+ * Create a standardized error response
+ * @param error - Human-readable error message
+ * @param status - HTTP status code
+ * @param code - Programmatic error code (optional)
+ * @param details - Additional context (optional)
+ */
+export const errorResponse = (
+	error: string,
+	status: number,
+	code?: string,
+	details?: unknown
+): ServerResponse => {
+	const body: Record<string, unknown> = { error }
+	if (code !== undefined) body.code = code
+	if (details !== undefined) body.details = details
+	return json(body as ErrorResponseBody, { status })
+}
+
+// Error response helpers (backwards compatible)
+export const notFound = (message = 'Not Found'): ServerResponse =>
+	errorResponse(message, 404, 'NOT_FOUND')
+
+export const badRequest = (message = 'Bad Request', details?: unknown): ServerResponse =>
+	errorResponse(message, 400, 'BAD_REQUEST', details)
 
 export const unauthorized = (message = 'Unauthorized'): ServerResponse =>
-	json({ error: message }, { status: 401 })
+	errorResponse(message, 401, 'UNAUTHORIZED')
 
 export const forbidden = (message = 'Forbidden'): ServerResponse =>
-	json({ error: message }, { status: 403 })
+	errorResponse(message, 403, 'FORBIDDEN')
 
-export const serverError = (message = 'Internal Server Error'): ServerResponse =>
-	json({ error: message }, { status: 500 })
+export const serverError = (message = 'Internal Server Error', details?: unknown): ServerResponse =>
+	errorResponse(message, 500, 'INTERNAL_ERROR', details)
+
+export const validationError = (message = 'Validation Error', details?: unknown): ServerResponse =>
+	errorResponse(message, 400, 'VALIDATION_ERROR', details)
+
+export const payloadTooLarge = (message = 'Payload Too Large', details?: unknown): ServerResponse =>
+	errorResponse(message, 413, 'PAYLOAD_TOO_LARGE', details)
+
+export const tooManyRequests = (message = 'Too Many Requests', details?: unknown): ServerResponse =>
+	errorResponse(message, 429, 'TOO_MANY_REQUESTS', details)
