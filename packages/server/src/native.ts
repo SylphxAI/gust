@@ -498,6 +498,7 @@ export interface NativeServer {
 let nativeBinding: NativeBinding | null = null
 let nativeLoadAttempted = false
 let nativeLoadError: Error | null = null
+let nativeWarningLogged = false
 
 /**
  * Try to load the native binding
@@ -521,6 +522,13 @@ const loadNative = (): NativeBinding | null => {
 			return nativeBinding
 		} catch {
 			nativeLoadError = e as Error
+			if (!nativeWarningLogged) {
+				nativeWarningLogged = true
+				console.warn(
+					'[gust] Native binding (@sylphx/gust-napi) unavailable, using JS/WASM fallback. ' +
+						'For best performance, install the native package for your platform.'
+				)
+			}
 			return null
 		}
 	}

@@ -15,6 +15,7 @@ import type * as WasmTypes from './wasm/gust_wasm'
 let wasmModule: typeof WasmTypes | null = null
 let wasmLoadAttempted = false
 let wasmLoadError: Error | null = null
+let wasmWarningLogged = false
 
 /**
  * Get the directory of this module
@@ -64,6 +65,14 @@ const initWasmSync = (): boolean => {
 		return true
 	} catch (e) {
 		wasmLoadError = e as Error
+		if (!wasmWarningLogged) {
+			wasmWarningLogged = true
+			console.warn(
+				'[gust] WASM module unavailable, using Node.js crypto fallback. ' +
+					'Performance may be reduced. Error:',
+				(e as Error).message
+			)
+		}
 		return false
 	}
 }
@@ -98,6 +107,14 @@ export const initWasm = async (): Promise<boolean> => {
 		return true
 	} catch (e) {
 		wasmLoadError = e as Error
+		if (!wasmWarningLogged) {
+			wasmWarningLogged = true
+			console.warn(
+				'[gust] WASM module unavailable, using Node.js crypto fallback. ' +
+					'Performance may be reduced. Error:',
+				(e as Error).message
+			)
+		}
 		return false
 	}
 }
