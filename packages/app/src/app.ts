@@ -58,41 +58,42 @@ const normalizeResponse = async (
 }
 
 /**
- * Call handler with automatic signature detection
+ * Gust-style handler type
+ * Takes { ctx, input } object and returns ServerResponse
+ */
+type GustHandler<App = unknown> = (args: {
+	ctx: Context<App>
+	input: unknown
+}) => ServerResponse | Promise<ServerResponse>
+
+/**
+ * Call handler with type-safe dispatch
  *
- * Supports both Gust-style and fetch-style handlers:
- * - Gust: ({ ctx, input }) => ServerResponse
- * - Fetch: (request: Request) => Response
+ * Uses marker symbol to detect handler type instead of try-catch.
+ * Handlers wrapped with fetchHandler() are dispatched as Fetch-style,
+ * all other handlers are dispatched as Gust-style.
  *
- * Enables direct usage: `all('/graphql', yoga.fetch)`
+ * @example Gust-style (default)
+ * ```typescript
+ * get('/users', ({ ctx }) => json(ctx.app.users))
+ * ```
+ *
+ * @example Fetch-style (with fetchHandler wrapper)
+ * ```typescript
+ * import { createYoga } from 'graphql-yoga'
+ * all('/graphql', fetchHandler(yoga.fetch))
+ * ```
  */
 const callHandler = async (
-	// biome-ignore lint/complexity/noBannedTypes: Handler can be either Gust-style or Fetch-style function
-	handler: Function,
+	handler: GustHandler,
 	ctx: Context<unknown>,
 	input: unknown
 ): Promise<ServerResponse> => {
-	// If no request available, can only use Gust-style
-	if (!ctx.request) {
-		return normalizeResponse(handler({ ctx, input }))
-	}
-
-	// Try Gust-style first ({ ctx, input })
-	try {
-		const result = handler({ ctx, input })
-
-		// Check if result looks valid (not undefined, has status or is Response)
-		const resolved = await result
-		if (resolved !== undefined && resolved !== null) {
-			// Valid result - could be ServerResponse or Response
-			return normalizeResponse(resolved)
-		}
-	} catch (e) {
-		// Gust-style failed, will try fetch-style below
-	}
-
-	// Fallback: try fetch-style (request: Request)
-	return normalizeResponse(handler(ctx.request))
+	// Fetch-style handlers are already wrapped by fetchHandler()
+	// They accept { ctx, input } but internally use ctx.request
+	// So we can call them uniformly as Gust-style
+	const result = handler({ ctx, input })
+	return normalizeResponse(result)
 }
 
 // ============================================================================
@@ -522,7 +523,7 @@ export const createApp = <App = Record<string, never>>(config: AppConfig<App>): 
 				}
 			},
 			raw: body,
-			socket: null as unknown as import('node:net').Socket, // Not available in native path
+			socket: null, // Not available in native path
 		}
 
 		// Create app context

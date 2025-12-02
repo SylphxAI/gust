@@ -10,6 +10,27 @@ import type { ServerResponse } from '@sylphx/gust-core'
 import type { Context } from './context'
 
 // ============================================================================
+// Handler Type Detection
+// ============================================================================
+
+/**
+ * Symbol to mark handlers that expect Fetch-style invocation (Request → Response)
+ * Used by callHandler() to dispatch correctly without try-catch
+ */
+export const FETCH_HANDLER_MARKER = Symbol.for('gust.fetchHandler')
+
+/**
+ * Check if a handler is marked as Fetch-style
+ */
+export const isFetchHandler = (handler: unknown): boolean => {
+	return (
+		typeof handler === 'function' &&
+		FETCH_HANDLER_MARKER in handler &&
+		(handler as Record<symbol, boolean>)[FETCH_HANDLER_MARKER] === true
+	)
+}
+
+// ============================================================================
 // Fetch Handler Adapter
 // ============================================================================
 
@@ -59,7 +80,7 @@ export type FetchHandler = (request: Request) => Response | Promise<Response>
 export const fetchHandler = <App = Record<string, never>>(
 	handler: FetchHandler
 ): RouteHandlerFn<App, string> => {
-	return ({ ctx }) => {
+	const wrapped = ({ ctx }: { ctx: Context<App> }) => {
 		if (!ctx.request) {
 			// Fallback: reconstruct request from context
 			const url = `http://localhost${ctx.path}${ctx.query ? `?${ctx.query}` : ''}`
@@ -72,6 +93,11 @@ export const fetchHandler = <App = Record<string, never>>(
 		}
 		return handler(ctx.request) as unknown as ServerResponse
 	}
+
+	// Mark as fetch-style handler for callHandler() dispatch
+	;(wrapped as Record<symbol, boolean>)[FETCH_HANDLER_MARKER] = true
+
+	return wrapped as RouteHandlerFn<App, string>
 }
 
 // ============================================================================
