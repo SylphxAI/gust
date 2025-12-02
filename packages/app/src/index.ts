@@ -202,6 +202,7 @@ export {
 	csrfDoubleSubmit,
 	csrfField,
 	csrfMeta,
+	generateCsrfSecret,
 	generateCsrfToken,
 	getCsrfToken,
 	verifyCsrfToken,

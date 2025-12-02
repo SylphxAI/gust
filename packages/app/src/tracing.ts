@@ -21,24 +21,32 @@ export type TracingOptions = {
 }
 
 /**
+ * Generate random hex string using Node.js crypto fallback
+ */
+const cryptoRandomHex = (bytes: number): string => {
+	const { randomBytes } = require('node:crypto')
+	return randomBytes(bytes).toString('hex')
+}
+
+/**
  * Generate default request ID (32 hex chars)
- * Uses WASM implementation.
+ * Uses WASM with Node.js crypto fallback.
  */
 const defaultGenerator = (): string => {
 	const traceId = wasmGenerateTraceId()
 	if (traceId) return traceId
-	// Fallback should not happen - WASM always available
-	throw new Error('WASM trace ID generation unavailable')
+	// Fallback to Node.js crypto
+	return cryptoRandomHex(16)
 }
 
 /**
  * Generate UUID v4
  * Uses WASM random bytes with UUID v4 formatting.
+ * Falls back to Node.js crypto if WASM unavailable.
  */
 export const generateUUID = (): string => {
 	// Use trace ID (32 hex = 16 bytes) and format as UUID v4
-	const hex = wasmGenerateTraceId()
-	if (!hex) throw new Error('WASM trace ID generation unavailable')
+	const hex = wasmGenerateTraceId() || cryptoRandomHex(16)
 
 	// Format as UUID v4: set version (4) and variant bits
 	const chars = hex.split('')
@@ -56,26 +64,26 @@ export const generateUUID = (): string => {
 
 /**
  * Generate short ID (8 hex chars)
- * Uses WASM span ID generation.
+ * Uses WASM span ID with Node.js crypto fallback.
  */
 export const generateShortId = (): string => {
 	const spanId = wasmGenerateSpanId()
-	if (!spanId) throw new Error('WASM span ID generation unavailable')
-	return spanId.slice(0, 8)
+	if (spanId) return spanId.slice(0, 8)
+	// Fallback to Node.js crypto
+	return cryptoRandomHex(4)
 }
 
 /**
  * Generate nanoid-style ID
- * Uses WASM random with base62 encoding.
+ * Uses WASM random with base62 encoding and Node.js crypto fallback.
  */
 export const generateNanoId = (size = 21): string => {
 	const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-	// Generate enough trace IDs to cover the size (each trace ID = 32 hex = 16 bytes)
+	// Generate enough bytes to cover the size
 	let hex = ''
 	while (hex.length < size * 2) {
 		const traceId = wasmGenerateTraceId()
-		if (!traceId) throw new Error('WASM trace ID generation unavailable')
-		hex += traceId
+		hex += traceId || cryptoRandomHex(16)
 	}
 
 	let id = ''

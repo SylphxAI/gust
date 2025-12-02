@@ -76,15 +76,20 @@ export type SessionOptions = {
 
 /**
  * Generate secure session ID
- * Uses WASM for random generation.
+ * Uses WASM for random generation with Node.js crypto fallback.
  */
 export const generateSessionId = (): string => {
-	// Use trace ID (32 hex chars) and convert to base64url for shorter representation
+	// Try WASM first (faster)
 	const traceId = wasmGenerateTraceId()
-	if (!traceId) throw new Error('WASM trace ID generation unavailable')
-	// Convert hex to base64url (32 hex chars = 16 bytes = ~22 base64 chars)
-	const bytes = Buffer.from(traceId, 'hex')
-	return bytes.toString('base64url')
+	if (traceId) {
+		// Convert hex to base64url (32 hex chars = 16 bytes = ~22 base64 chars)
+		const bytes = Buffer.from(traceId, 'hex')
+		return bytes.toString('base64url')
+	}
+
+	// Fallback to Node.js crypto
+	const { randomBytes } = require('node:crypto')
+	return randomBytes(16).toString('base64url')
 }
 
 /**

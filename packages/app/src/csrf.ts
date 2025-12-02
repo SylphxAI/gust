@@ -44,7 +44,7 @@ export type CsrfOptions = {
 
 /**
  * Generate random bytes as base64url
- * Uses WASM for random generation.
+ * Uses WASM for random generation with Node.js crypto fallback.
  * @param byteLength - Number of random bytes (output will be ~4/3 longer in base64)
  */
 const generateRandomBase64url = (byteLength: number): string => {
@@ -53,10 +53,20 @@ const generateRandomBase64url = (byteLength: number): string => {
 	const traceIdsNeeded = Math.ceil(bytesNeeded / 16)
 
 	let hexString = ''
+	let wasmAvailable = true
 	for (let i = 0; i < traceIdsNeeded; i++) {
 		const traceId = wasmGenerateTraceId()
-		if (!traceId) throw new Error('WASM trace ID generation unavailable')
+		if (!traceId) {
+			wasmAvailable = false
+			break
+		}
 		hexString += traceId
+	}
+
+	// Fallback to Node.js crypto if WASM unavailable
+	if (!wasmAvailable) {
+		const { randomBytes } = require('node:crypto')
+		return randomBytes(byteLength).toString('base64url')
 	}
 
 	// Convert hex to bytes and then to base64url
