@@ -1,5 +1,4 @@
-import { execSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,20 +11,6 @@ const { platform, arch } = process
 let nativeBinding = null
 let localFileExisted = false
 let loadError = null
-
-function isMusl() {
-	if (!process.report || typeof process.report.getReport !== 'function') {
-		try {
-			const lddPath = execSync('which ldd').toString().trim()
-			return readFileSync(lddPath, 'utf8').includes('musl')
-		} catch {
-			return true
-		}
-	} else {
-		const { glibcVersionRuntime } = process.report.getReport().header
-		return !glibcVersionRuntime
-	}
-}
 
 switch (platform) {
 	case 'darwin':
@@ -61,53 +46,27 @@ switch (platform) {
 	case 'linux':
 		switch (arch) {
 			case 'x64':
-				if (isMusl()) {
-					localFileExisted = existsSync(join(__dirname, 'gust-napi.linux-x64-musl.node'))
-					try {
-						if (localFileExisted) {
-							nativeBinding = require('./gust-napi.linux-x64-musl.node')
-						} else {
-							nativeBinding = require('@sylphx/gust-napi-linux-x64-musl')
-						}
-					} catch (e) {
-						loadError = e
+				localFileExisted = existsSync(join(__dirname, 'gust-napi.linux-x64-gnu.node'))
+				try {
+					if (localFileExisted) {
+						nativeBinding = require('./gust-napi.linux-x64-gnu.node')
+					} else {
+						nativeBinding = require('@sylphx/gust-napi-linux-x64-gnu')
 					}
-				} else {
-					localFileExisted = existsSync(join(__dirname, 'gust-napi.linux-x64-gnu.node'))
-					try {
-						if (localFileExisted) {
-							nativeBinding = require('./gust-napi.linux-x64-gnu.node')
-						} else {
-							nativeBinding = require('@sylphx/gust-napi-linux-x64-gnu')
-						}
-					} catch (e) {
-						loadError = e
-					}
+				} catch (e) {
+					loadError = e
 				}
 				break
 			case 'arm64':
-				if (isMusl()) {
-					localFileExisted = existsSync(join(__dirname, 'gust-napi.linux-arm64-musl.node'))
-					try {
-						if (localFileExisted) {
-							nativeBinding = require('./gust-napi.linux-arm64-musl.node')
-						} else {
-							nativeBinding = require('@sylphx/gust-napi-linux-arm64-musl')
-						}
-					} catch (e) {
-						loadError = e
+				localFileExisted = existsSync(join(__dirname, 'gust-napi.linux-arm64-gnu.node'))
+				try {
+					if (localFileExisted) {
+						nativeBinding = require('./gust-napi.linux-arm64-gnu.node')
+					} else {
+						nativeBinding = require('@sylphx/gust-napi-linux-arm64-gnu')
 					}
-				} else {
-					localFileExisted = existsSync(join(__dirname, 'gust-napi.linux-arm64-gnu.node'))
-					try {
-						if (localFileExisted) {
-							nativeBinding = require('./gust-napi.linux-arm64-gnu.node')
-						} else {
-							nativeBinding = require('@sylphx/gust-napi-linux-arm64-gnu')
-						}
-					} catch (e) {
-						loadError = e
-					}
+				} catch (e) {
+					loadError = e
 				}
 				break
 			default:

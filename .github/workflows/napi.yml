@@ -45,22 +45,14 @@ jobs:
           - host: macos-13
             target: x86_64-apple-darwin
             build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target x86_64-apple-darwin
-          # Linux x64 GNU
+          # Linux x64 GNU (native build)
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target x86_64-unknown-linux-gnu
-          # Linux x64 musl (Alpine)
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target x86_64-unknown-linux-musl --use-napi-cross
-          # Linux arm64 GNU
+          # Linux arm64 GNU (cross-compile with napi-cross)
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target aarch64-unknown-linux-gnu --use-napi-cross
-          # Linux arm64 musl
-          - host: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target aarch64-unknown-linux-musl --use-napi-cross
 
     name: Build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
@@ -78,16 +70,18 @@ jobs:
         with:
           targets: ${{ matrix.settings.target }}
 
-      - name: Cache cargo
+      - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ matrix.settings.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ matrix.settings.target }}-cargo-
+            cargo-registry-
+
+      - name: Clean target for cross-builds
+        run: rm -rf target/${{ matrix.settings.target }}/release/gust* || true
 
       - name: Install Docker
         if: contains(matrix.settings.build, '--use-napi-cross')
