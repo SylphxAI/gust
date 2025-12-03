@@ -8,23 +8,28 @@
 
 ## Performance
 
-### Bun Runtime
+### Dynamic Routes (Bun Runtime)
+
+Real-world benchmark with JS handler callbacks per request:
 
 | Framework | Requests/sec | Relative |
 |-----------|-------------|----------|
-| **Gust** | **232,704** | **1.00x** |
-| Elysia | 192,386 | 0.83x |
+| **Gust (Native)** | **141,266** | **1.00x** |
+| Bun.serve | 136,313 | 0.96x |
+| Elysia | 129,224 | 0.91x |
+| Hono | 125,000 | 0.88x |
+| Express | 47,343 | 0.34x |
+
+### Static Routes (Bun Runtime)
+
+Maximum throughput with pre-computed responses:
+
+| Framework | Requests/sec | Relative |
+|-----------|-------------|----------|
+| **Gust (Turbo)** | **232,704** | **1.00x** |
 | Bun.serve | 183,716 | 0.79x |
+| Elysia | 192,386 | 0.83x |
 | Hono | 157,729 | 0.68x |
-| Express | 47,343 | 0.20x |
-
-### Node.js Runtime
-
-| Framework | Requests/sec | Relative |
-|-----------|-------------|----------|
-| **Gust (Native)** | **215,821** | **1.00x** |
-| Fastify | 123,456 | 0.57x |
-| Express | 18,234 | 0.08x |
 
 > Benchmarks: `bombardier -c 500 -d 10s http://localhost:3000` on Apple M3 Max
 
@@ -49,7 +54,7 @@
 │   hyper + tokio         │       Universal runtime           │
 │   napi-rs bindings      │       HTTP parser + router        │
 │   io_uring on Linux     │                                   │
-│   215K+ req/s           │                                   │
+│   141K+ req/s           │                                   │
 └─────────────────────────┴───────────────────────────────────┘
 ```
 
