@@ -1,61 +1,10 @@
 //! HTTP Request types
 
-use crate::{Error, Result};
 use smallvec::SmallVec;
 use std::collections::HashMap;
 
-/// HTTP Methods
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Method {
-    Get,
-    Post,
-    Put,
-    Delete,
-    Patch,
-    Head,
-    Options,
-    Connect,
-    Trace,
-}
-
-impl Method {
-    /// Parse from string
-    pub fn from_str(s: &str) -> Result<Self> {
-        match s.to_uppercase().as_str() {
-            "GET" => Ok(Method::Get),
-            "POST" => Ok(Method::Post),
-            "PUT" => Ok(Method::Put),
-            "DELETE" => Ok(Method::Delete),
-            "PATCH" => Ok(Method::Patch),
-            "HEAD" => Ok(Method::Head),
-            "OPTIONS" => Ok(Method::Options),
-            "CONNECT" => Ok(Method::Connect),
-            "TRACE" => Ok(Method::Trace),
-            _ => Err(Error::InvalidMethod(s.to_string())),
-        }
-    }
-
-    /// Convert to string
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Method::Get => "GET",
-            Method::Post => "POST",
-            Method::Put => "PUT",
-            Method::Delete => "DELETE",
-            Method::Patch => "PATCH",
-            Method::Head => "HEAD",
-            Method::Options => "OPTIONS",
-            Method::Connect => "CONNECT",
-            Method::Trace => "TRACE",
-        }
-    }
-}
-
-impl std::fmt::Display for Method {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
+// Re-export Method from parser module (SSOT)
+pub use crate::parser::Method;
 
 /// HTTP Request
 #[derive(Debug, Clone)]

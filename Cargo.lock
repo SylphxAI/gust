@@ -381,23 +381,16 @@ dependencies = [
  "arc-swap",
  "async-stream",
  "brotli 7.0.0",
- "bytes",
  "flate2",
  "futures-util",
  "gust-core",
- "http-body-util",
- "hyper",
- "hyper-util",
  "mimalloc",
  "napi",
  "napi-build",
  "napi-derive",
- "num_cpus",
  "pin-project-lite",
  "rustls",
  "rustls-pemfile",
- "smallvec",
- "tokio",
  "tokio-rustls",
  "tokio-uring",
 ]
@@ -410,6 +403,7 @@ version = "0.1.0"
 name = "gust-wasm"
 version = "0.1.0"
 dependencies = [
+ "gust-core",
  "gust-router",
  "js-sys",
  "memchr",

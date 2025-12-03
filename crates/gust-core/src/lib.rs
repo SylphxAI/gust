@@ -11,12 +11,15 @@
 #![forbid(unsafe_code)]
 #![warn(clippy::all)]
 
+pub mod crypto;
 pub mod error;
+pub mod parser;
 pub mod request;
 pub mod response;
 pub mod router;
 pub mod middleware;
 pub mod handlers;
+pub mod tracing;
 
 #[cfg(feature = "native")]
 pub mod http2;
@@ -57,3 +60,16 @@ pub use http2::{Http2Settings, Http2Response, PushPromise, Priority, ConnectionI
 
 #[cfg(feature = "tls")]
 pub use tls::{TlsConfig, load_certs, load_private_key};
+
+// Re-export core dependencies for downstream crates (SSOT)
+pub use bytes;
+#[cfg(feature = "native")]
+pub use tokio;
+#[cfg(feature = "native")]
+pub use hyper;
+#[cfg(feature = "native")]
+pub use hyper_util;
+#[cfg(feature = "native")]
+pub use http_body_util;
+#[cfg(feature = "native")]
+pub use num_cpus;

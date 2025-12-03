@@ -1,101 +1,12 @@
 //! Zero-copy HTTP/1.1 request parser
 //! Optimized for minimal allocations and SIMD acceleration
+//!
+//! Uses gust_core::parser types for SSOT.
 
 use memchr::{memchr, memchr2};
 
-/// HTTP Method
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Method {
-    Get = 0,
-    Post = 1,
-    Put = 2,
-    Delete = 3,
-    Patch = 4,
-    Head = 5,
-    Options = 6,
-    Connect = 7,
-    Trace = 8,
-}
-
-impl Method {
-    /// Parse method from bytes - optimized with early length check
-    #[inline(always)]
-    pub fn parse(bytes: &[u8]) -> Option<Self> {
-        // Fast path: check first byte
-        match bytes.first()? {
-            b'G' if bytes == b"GET" => Some(Method::Get),
-            b'P' => match bytes {
-                b"POST" => Some(Method::Post),
-                b"PUT" => Some(Method::Put),
-                b"PATCH" => Some(Method::Patch),
-                _ => None,
-            },
-            b'D' if bytes == b"DELETE" => Some(Method::Delete),
-            b'H' if bytes == b"HEAD" => Some(Method::Head),
-            b'O' if bytes == b"OPTIONS" => Some(Method::Options),
-            b'C' if bytes == b"CONNECT" => Some(Method::Connect),
-            b'T' if bytes == b"TRACE" => Some(Method::Trace),
-            _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Method::Get => "GET",
-            Method::Post => "POST",
-            Method::Put => "PUT",
-            Method::Delete => "DELETE",
-            Method::Patch => "PATCH",
-            Method::Head => "HEAD",
-            Method::Options => "OPTIONS",
-            Method::Connect => "CONNECT",
-            Method::Trace => "TRACE",
-        }
-    }
-}
-
-/// Maximum number of headers to parse
-pub const MAX_HEADERS: usize = 64;
-
-/// Header offsets: [name_start, name_end, value_start, value_end]
-pub type HeaderOffsets = [u32; MAX_HEADERS * 4];
-
-/// Parsed request result - all offsets, no allocations
-#[derive(Debug, Clone, Copy)]
-pub struct ParsedRequest {
-    /// Parse state: 0=incomplete, 1=complete, 2=error
-    pub state: u8,
-    /// HTTP method
-    pub method: Method,
-    /// Path start offset
-    pub path_start: u32,
-    /// Path end offset
-    pub path_end: u32,
-    /// Query start offset (0 if none)
-    pub query_start: u32,
-    /// Query end offset (0 if none)
-    pub query_end: u32,
-    /// Number of headers parsed
-    pub headers_count: u32,
-    /// Body start offset
-    pub body_start: u32,
-}
-
-impl Default for ParsedRequest {
-    fn default() -> Self {
-        Self {
-            state: 0,
-            method: Method::Get,
-            path_start: 0,
-            path_end: 0,
-            query_start: 0,
-            query_end: 0,
-            headers_count: 0,
-            body_start: 0,
-        }
-    }
-}
+// Re-export from gust-core (SSOT)
+pub use gust_core::parser::{Method, HeaderOffsets, ParsedRequest, MAX_HEADERS};
 
 /// Parse HTTP request - returns all data in one pass
 /// header_offsets is filled with [name_start, name_end, value_start, value_end] for each header

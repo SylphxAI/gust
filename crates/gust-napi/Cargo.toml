@@ -18,18 +18,11 @@ io_uring = ["gust-core/io_uring", "dep:tokio-uring"]
 compress = ["gust-core/compress", "dep:flate2", "dep:brotli"]
 
 [dependencies]
+# Core library - re-exports tokio, hyper, hyper-util, http-body-util, bytes
 gust-core = { workspace = true, features = ["native"] }
 napi.workspace = true
 napi-derive.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "net", "io-util", "macros", "sync"] }
 mimalloc.workspace = true
-# Also need direct access to these for native server
-hyper = { workspace = true, features = ["server", "http1", "http2"] }
-hyper-util = { workspace = true, features = ["tokio", "http2"] }
-http-body-util.workspace = true
-bytes.workspace = true
-smallvec.workspace = true
-num_cpus.workspace = true
 # TLS support
 tokio-rustls = { workspace = true, optional = true }
 rustls = { version = "0.23", optional = true, default-features = false, features = ["std", "tls12"] }

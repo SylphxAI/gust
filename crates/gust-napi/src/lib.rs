@@ -11,7 +11,7 @@
 //! - WebSocket upgrade handling
 //! - Multi-threaded worker pool
 
-use bytes::Bytes;
+use gust_core::bytes::Bytes;
 use gust_core::{
     Method, Request, Response, ResponseBuilder, Router, StatusCode,
     // WebSocket support from core
@@ -29,7 +29,7 @@ use gust_core::{
         otel::{Span as RustSpan, SpanContext as RustSpanContext, SpanStatus as RustSpanStatus, Tracer as RustTracer, TracerConfig as RustTracerConfig, MetricsCollector as RustMetricsCollector, generate_trace_id as rust_generate_trace_id, generate_span_id as rust_generate_span_id, parse_traceparent as rust_parse_traceparent, format_traceparent as rust_format_traceparent},
     },
 };
-use http_body_util::{Full, BodyExt};
+use gust_core::http_body_util::{Full, BodyExt};
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{ThreadsafeFunction, ErrorStrategy};
 use napi_derive::napi;
@@ -37,6 +37,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 use std::time::Duration;
+use gust_core::tokio;
+use gust_core::hyper;
+use gust_core::hyper_util;
+use gust_core::num_cpus;
 use tokio::sync::RwLock;
 use arc_swap::ArcSwap;
 
@@ -1491,7 +1495,7 @@ impl GustServer {
     #[napi]
     pub async fn serve_with_hostname(&self, port: u32, hostname: String) -> Result<()> {
         use std::net::SocketAddr;
-        use tokio::net::TcpListener;
+        use tokio::net::TcpListener; // from gust_core::tokio
 
         let addr: SocketAddr = format!("{}:{}", hostname, port)
             .parse()
@@ -1538,6 +1542,7 @@ impl GustServer {
         state: Arc<ServerState>,
         shutdown_rx: tokio::sync::oneshot::Receiver<()>,
     ) -> Result<()> {
+        // Use re-exports from gust_core
         use hyper::server::conn::http1;
         use hyper::service::service_fn;
         use hyper_util::rt::TokioIo;
@@ -1607,6 +1612,7 @@ impl GustServer {
         state: Arc<ServerState>,
         shutdown_rx: tokio::sync::oneshot::Receiver<()>,
     ) -> Result<()> {
+        // Use re-exports from gust_core
         use hyper::server::conn::http1;
         use hyper::server::conn::http2;
         use hyper::service::service_fn;

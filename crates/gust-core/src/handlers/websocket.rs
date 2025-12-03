@@ -3,6 +3,7 @@
 //! Full WebSocket implementation with upgrade handling.
 
 use crate::{Request, Response, ResponseBuilder, StatusCode};
+use crate::crypto::{sha1, base64_encode};
 
 /// WebSocket message types
 #[derive(Debug, Clone)]
@@ -331,115 +332,7 @@ pub fn upgrade_response(req: &Request) -> Option<Response> {
     )
 }
 
-// SHA-1 implementation for WebSocket accept key
-fn sha1(input: &[u8]) -> [u8; 20] {
-    let mut h0: u32 = 0x67452301;
-    let mut h1: u32 = 0xEFCDAB89;
-    let mut h2: u32 = 0x98BADCFE;
-    let mut h3: u32 = 0x10325476;
-    let mut h4: u32 = 0xC3D2E1F0;
-
-    // Padding
-    let ml = (input.len() as u64) * 8;
-    let mut padded = input.to_vec();
-    padded.push(0x80);
-
-    while (padded.len() % 64) != 56 {
-        padded.push(0);
-    }
-
-    padded.extend_from_slice(&ml.to_be_bytes());
-
-    // Process blocks
-    for chunk in padded.chunks(64) {
-        let mut w = [0u32; 80];
-
-        for i in 0..16 {
-            w[i] = u32::from_be_bytes([
-                chunk[i * 4],
-                chunk[i * 4 + 1],
-                chunk[i * 4 + 2],
-                chunk[i * 4 + 3],
-            ]);
-        }
-
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-
-        let mut a = h0;
-        let mut b = h1;
-        let mut c = h2;
-        let mut d = h3;
-        let mut e = h4;
-
-        for i in 0..80 {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
-                20..=39 => (b ^ c ^ d, 0x6ED9EBA1u32),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDCu32),
-                _ => (b ^ c ^ d, 0xCA62C1D6u32),
-            };
-
-            let temp = a.rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(w[i]);
-
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        h0 = h0.wrapping_add(a);
-        h1 = h1.wrapping_add(b);
-        h2 = h2.wrapping_add(c);
-        h3 = h3.wrapping_add(d);
-        h4 = h4.wrapping_add(e);
-    }
-
-    let mut result = [0u8; 20];
-    result[0..4].copy_from_slice(&h0.to_be_bytes());
-    result[4..8].copy_from_slice(&h1.to_be_bytes());
-    result[8..12].copy_from_slice(&h2.to_be_bytes());
-    result[12..16].copy_from_slice(&h3.to_be_bytes());
-    result[16..20].copy_from_slice(&h4.to_be_bytes());
-    result
-}
-
-fn base64_encode(input: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut output = String::new();
-
-    for chunk in input.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
-
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-
-        output.push(ALPHABET[(triple >> 18) as usize & 0x3F] as char);
-        output.push(ALPHABET[(triple >> 12) as usize & 0x3F] as char);
-
-        if chunk.len() > 1 {
-            output.push(ALPHABET[(triple >> 6) as usize & 0x3F] as char);
-        } else {
-            output.push('=');
-        }
-
-        if chunk.len() > 2 {
-            output.push(ALPHABET[triple as usize & 0x3F] as char);
-        } else {
-            output.push('=');
-        }
-    }
-
-    output
-}
+// SHA-1 and Base64 implementations moved to crate::crypto module (SSOT)
 
 #[cfg(test)]
 mod tests {

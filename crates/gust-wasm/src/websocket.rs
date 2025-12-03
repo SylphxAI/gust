@@ -1,6 +1,7 @@
 //! WebSocket frame encoding/decoding for WASM
 //!
 //! Minimal implementation for edge/browser environments.
+//! Uses gust-core crypto module for SHA-1 and Base64 (SSOT).
 
 /// WebSocket opcode
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,15 +179,9 @@ pub fn encode_close(code: Option<u16>, reason: Option<&str>) -> Vec<u8> {
 }
 
 /// Generate WebSocket accept key from client key
-/// Uses SHA-1 (implemented inline for no-std compatibility)
+/// Uses gust_core::crypto (SSOT)
 pub fn generate_accept_key(key: &str) -> String {
-    const MAGIC: &[u8] = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-
-    let mut input = key.as_bytes().to_vec();
-    input.extend_from_slice(MAGIC);
-
-    let hash = sha1(&input);
-    base64_encode(&hash)
+    gust_core::crypto::websocket_accept_key(key)
 }
 
 /// Check if headers indicate WebSocket upgrade
@@ -212,117 +207,7 @@ pub fn is_websocket_upgrade(headers: &[(String, String)]) -> bool {
     has_upgrade && has_connection && has_key && has_version
 }
 
-// ============================================================================
-// SHA-1 implementation (minimal, for WebSocket accept key)
-// ============================================================================
-
-fn sha1(data: &[u8]) -> [u8; 20] {
-    let mut h0: u32 = 0x67452301;
-    let mut h1: u32 = 0xEFCDAB89;
-    let mut h2: u32 = 0x98BADCFE;
-    let mut h3: u32 = 0x10325476;
-    let mut h4: u32 = 0xC3D2E1F0;
-
-    // Pre-processing: adding padding bits
-    let ml = (data.len() as u64) * 8;
-    let mut msg = data.to_vec();
-    msg.push(0x80);
-
-    while (msg.len() % 64) != 56 {
-        msg.push(0);
-    }
-
-    msg.extend_from_slice(&ml.to_be_bytes());
-
-    // Process each 512-bit chunk
-    for chunk in msg.chunks(64) {
-        let mut w = [0u32; 80];
-
-        for (i, bytes) in chunk.chunks(4).enumerate() {
-            w[i] = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-        }
-
-        for i in 16..80 {
-            w[i] = (w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16]).rotate_left(1);
-        }
-
-        let mut a = h0;
-        let mut b = h1;
-        let mut c = h2;
-        let mut d = h3;
-        let mut e = h4;
-
-        for i in 0..80 {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), 0x5A827999u32),
-                20..=39 => (b ^ c ^ d, 0x6ED9EBA1u32),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1BBCDCu32),
-                _ => (b ^ c ^ d, 0xCA62C1D6u32),
-            };
-
-            let temp = a.rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(w[i]);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-
-        h0 = h0.wrapping_add(a);
-        h1 = h1.wrapping_add(b);
-        h2 = h2.wrapping_add(c);
-        h3 = h3.wrapping_add(d);
-        h4 = h4.wrapping_add(e);
-    }
-
-    let mut result = [0u8; 20];
-    result[0..4].copy_from_slice(&h0.to_be_bytes());
-    result[4..8].copy_from_slice(&h1.to_be_bytes());
-    result[8..12].copy_from_slice(&h2.to_be_bytes());
-    result[12..16].copy_from_slice(&h3.to_be_bytes());
-    result[16..20].copy_from_slice(&h4.to_be_bytes());
-    result
-}
-
-// ============================================================================
-// Base64 encoding (minimal)
-// ============================================================================
-
-const BASE64_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-fn base64_encode(data: &[u8]) -> String {
-    let mut result = String::new();
-    let mut i = 0;
-
-    while i < data.len() {
-        let b0 = data[i];
-        let b1 = if i + 1 < data.len() { data[i + 1] } else { 0 };
-        let b2 = if i + 2 < data.len() { data[i + 2] } else { 0 };
-
-        result.push(BASE64_CHARS[(b0 >> 2) as usize] as char);
-        result.push(BASE64_CHARS[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char);
-
-        if i + 1 < data.len() {
-            result.push(BASE64_CHARS[(((b1 & 0x0F) << 2) | (b2 >> 6)) as usize] as char);
-        } else {
-            result.push('=');
-        }
-
-        if i + 2 < data.len() {
-            result.push(BASE64_CHARS[(b2 & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-
-        i += 3;
-    }
-
-    result
-}
+// SHA-1 and Base64 implementations moved to gust_core::crypto (SSOT)
 
 #[cfg(test)]
 mod tests {

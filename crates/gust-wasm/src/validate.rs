@@ -1,27 +1,10 @@
 //! Validation for WASM
 //!
 //! Schema-based validation for request data.
+//! Uses gust_core::middleware::validate for format validation (SSOT).
 
-/// Schema type
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SchemaType {
-    String,
-    Number,
-    Boolean,
-    Object,
-    Array,
-    Any,
-}
-
-/// String format
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StringFormat {
-    Email,
-    Url,
-    Uuid,
-    Date,
-    DateTime,
-}
+// Re-export types from gust-core (SSOT)
+pub use gust_core::middleware::validate::{SchemaType, StringFormat};
 
 /// Validation error
 #[derive(Debug, Clone)]
@@ -82,20 +65,12 @@ pub fn validate_string(
         }
     }
 
-    // Format checks
+    // Format checks - use gust_core StringFormat.validate() (SSOT)
     if let Some(fmt) = format {
-        let valid = match fmt {
-            StringFormat::Email => is_valid_email(value),
-            StringFormat::Url => is_valid_url(value),
-            StringFormat::Uuid => is_valid_uuid(value),
-            StringFormat::Date => is_valid_date(value),
-            StringFormat::DateTime => is_valid_datetime(value),
-        };
-
-        if !valid {
+        if !fmt.validate(value) {
             return ValidationResult::error(
                 "",
-                &format!("Invalid {:?} format", fmt),
+                &format!("Invalid {} format", fmt.name()),
                 "format",
             );
         }
@@ -138,86 +113,7 @@ pub fn validate_number(
     ValidationResult::ok()
 }
 
-// ============================================================================
-// Format validators
-// ============================================================================
-
-fn is_valid_email(s: &str) -> bool {
-    // Simple email validation
-    let at_pos = s.find('@');
-    let dot_pos = s.rfind('.');
-
-    match (at_pos, dot_pos) {
-        (Some(at), Some(dot)) => {
-            at > 0 && dot > at + 1 && dot < s.len() - 1 && !s.contains(' ')
-        }
-        _ => false,
-    }
-}
-
-fn is_valid_url(s: &str) -> bool {
-    s.starts_with("http://") || s.starts_with("https://")
-}
-
-fn is_valid_uuid(s: &str) -> bool {
-    if s.len() != 36 {
-        return false;
-    }
-
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.len() != 5 {
-        return false;
-    }
-
-    let expected_lens = [8, 4, 4, 4, 12];
-    for (part, &expected) in parts.iter().zip(&expected_lens) {
-        if part.len() != expected {
-            return false;
-        }
-        if !part.chars().all(|c| c.is_ascii_hexdigit()) {
-            return false;
-        }
-    }
-
-    true
-}
-
-fn is_valid_date(s: &str) -> bool {
-    // YYYY-MM-DD format
-    if s.len() != 10 {
-        return false;
-    }
-
-    let parts: Vec<&str> = s.split('-').collect();
-    if parts.len() != 3 {
-        return false;
-    }
-
-    parts[0].len() == 4 && parts[1].len() == 2 && parts[2].len() == 2
-        && parts.iter().all(|p| p.chars().all(|c| c.is_ascii_digit()))
-}
-
-fn is_valid_datetime(s: &str) -> bool {
-    // ISO 8601 format: YYYY-MM-DDTHH:MM:SS
-    if s.len() < 19 {
-        return false;
-    }
-
-    // Check date part
-    if !is_valid_date(&s[..10]) {
-        return false;
-    }
-
-    // Check separator
-    if s.as_bytes()[10] != b'T' {
-        return false;
-    }
-
-    // Check time part (basic validation)
-    let time = &s[11..19];
-    let parts: Vec<&str> = time.split(':').collect();
-    parts.len() == 3 && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_digit()))
-}
+// Format validators moved to gust_core::middleware::validate::StringFormat (SSOT)
 
 #[cfg(test)]
 mod tests {
@@ -225,18 +121,20 @@ mod tests {
 
     #[test]
     fn test_email_validation() {
-        assert!(is_valid_email("test@example.com"));
-        assert!(is_valid_email("user.name@domain.co.uk"));
-        assert!(!is_valid_email("invalid"));
-        assert!(!is_valid_email("@example.com"));
-        assert!(!is_valid_email("test@"));
+        // Use StringFormat.validate() from gust-core (SSOT)
+        assert!(StringFormat::Email.validate("test@example.com"));
+        assert!(StringFormat::Email.validate("user.name@domain.co.uk"));
+        assert!(!StringFormat::Email.validate("invalid"));
+        assert!(!StringFormat::Email.validate("@example.com"));
+        assert!(!StringFormat::Email.validate("test@"));
     }
 
     #[test]
     fn test_uuid_validation() {
-        assert!(is_valid_uuid("550e8400-e29b-41d4-a716-446655440000"));
-        assert!(!is_valid_uuid("550e8400-e29b-41d4-a716"));
-        assert!(!is_valid_uuid("not-a-uuid"));
+        // Use StringFormat.validate() from gust-core (SSOT)
+        assert!(StringFormat::Uuid.validate("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(!StringFormat::Uuid.validate("550e8400-e29b-41d4-a716"));
+        assert!(!StringFormat::Uuid.validate("not-a-uuid"));
     }
 
     #[test]
