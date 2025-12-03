@@ -13,7 +13,21 @@ jobs:
         # Sync NAPI package versions with main package
         VERSION=$(jq -r .version packages/gust/package.json)
         echo "Syncing NAPI packages to version $VERSION"
-        cd crates/gust-napi && npx napi version $VERSION --skip-gh-release
+
+        # Update main NAPI package.json
+        cd crates/gust-napi
+        jq ".version = \"$VERSION\"" package.json > tmp.json && mv tmp.json package.json
+
+        # Update optionalDependencies versions
+        jq ".optionalDependencies = (.optionalDependencies | to_entries | map(.value = \"$VERSION\") | from_entries)" package.json > tmp.json && mv tmp.json package.json
+
+        # Update all platform package.json files
+        for dir in npm/*/; do
+          if [ -f "$dir/package.json" ]; then
+            jq ".version = \"$VERSION\"" "$dir/package.json" > tmp.json && mv tmp.json "$dir/package.json"
+            echo "Updated $dir to version $VERSION"
+          fi
+        done
 
         # Trigger NAPI publish workflow
         gh workflow run napi.yml -f publish=true
