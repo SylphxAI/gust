@@ -1,6 +1,6 @@
 {
 	"name": "@sylphx/gust-napi",
-	"version": "0.1.0",
+	"version": "0.1.11",
 	"description": "High-performance HTTP server framework - Native Node.js bindings",
 	"type": "module",
 	"main": "./index.js",
@@ -25,10 +25,10 @@
 		"node": ">= 18.0.0"
 	},
 	"optionalDependencies": {
-		"@sylphx/gust-napi-darwin-arm64": "0.1.0",
-		"@sylphx/gust-napi-darwin-x64": "0.1.0",
-		"@sylphx/gust-napi-linux-x64-gnu": "0.1.0",
-		"@sylphx/gust-napi-linux-arm64-gnu": "0.1.0"
+		"@sylphx/gust-napi-darwin-arm64": "0.1.11",
+		"@sylphx/gust-napi-darwin-x64": "0.1.11",
+		"@sylphx/gust-napi-linux-x64-gnu": "0.1.11",
+		"@sylphx/gust-napi-linux-arm64-gnu": "0.1.11"
 	},
 	"keywords": [
 		"gust",
