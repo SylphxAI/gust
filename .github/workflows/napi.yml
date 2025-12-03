@@ -87,30 +87,27 @@ jobs:
       - name: Move artifact to npm directory
         shell: bash
         run: |
-          # Find the built gust-napi .node file (exclude index.node from bun install)
-          NODE_FILE=$(ls crates/gust-napi/gust-napi.*.node 2>/dev/null || echo "")
-          if [ -z "$NODE_FILE" ]; then
-            echo "No gust-napi.*.node file found!"
+          # Map Rust target to npm directory and file suffix
+          TARGET="${{ matrix.settings.target }}"
+          case "$TARGET" in
+            aarch64-apple-darwin) NPM_DIR="darwin-arm64"; SUFFIX="darwin-arm64" ;;
+            x86_64-apple-darwin) NPM_DIR="darwin-x64"; SUFFIX="darwin-x64" ;;
+            x86_64-unknown-linux-gnu) NPM_DIR="linux-x64-gnu"; SUFFIX="linux-x64-gnu" ;;
+            aarch64-unknown-linux-gnu) NPM_DIR="linux-arm64-gnu"; SUFFIX="linux-arm64-gnu" ;;
+            *) echo "Unknown target: $TARGET"; exit 1 ;;
+          esac
+
+          NODE_FILE="crates/gust-napi/gust-napi.${SUFFIX}.node"
+          if [ ! -f "$NODE_FILE" ]; then
+            echo "Expected file not found: $NODE_FILE"
             ls -la crates/gust-napi/
             exit 1
           fi
 
-          # Determine target npm directory based on filename
-          FILENAME=$(basename "$NODE_FILE")
-          case "$FILENAME" in
-            *darwin-arm64*) NPM_DIR="darwin-arm64" ;;
-            *darwin-x64*) NPM_DIR="darwin-x64" ;;
-            *linux-x64-gnu*) NPM_DIR="linux-x64-gnu" ;;
-            *linux-x64-musl*) NPM_DIR="linux-x64-musl" ;;
-            *linux-arm64-gnu*) NPM_DIR="linux-arm64-gnu" ;;
-            *linux-arm64-musl*) NPM_DIR="linux-arm64-musl" ;;
-            *) echo "Unknown target: $FILENAME"; exit 1 ;;
-          esac
-
-          # Create target directory if needed and move file
+          # Create target directory and move file
           mkdir -p "crates/gust-napi/npm/$NPM_DIR"
           mv "$NODE_FILE" "crates/gust-napi/npm/$NPM_DIR/"
-          echo "Moved $FILENAME to npm/$NPM_DIR/"
+          echo "Moved gust-napi.${SUFFIX}.node to npm/$NPM_DIR/"
           ls -la "crates/gust-napi/npm/$NPM_DIR/"
 
       - name: Upload artifact
