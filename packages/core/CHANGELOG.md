@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.8 (2025-12-03)
+
+### ✨ Features
+
+- **errors:** standardize error response format across codebase ([d77372a](https://github.com/SylphxAI/gust/commit/d77372a37ff5bb8aa2e30cf1c5bf406a0b8e339d))
+
+### 📦 Build
+
+- add per-package tsconfig.json for isolated typecheck ([eebc220](https://github.com/SylphxAI/gust/commit/eebc22034ad93eb6e26ec95f71f3a2435cc5304d))
+
 ## 0.1.7 (2025-11-29)
 
 ### 🐛 Bug Fixes
