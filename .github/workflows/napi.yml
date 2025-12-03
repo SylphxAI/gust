@@ -40,19 +40,15 @@ jobs:
           # Darwin arm64 (Apple Silicon)
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target aarch64-apple-darwin
           # Darwin x64 (Intel macOS)
           - host: macos-13
             target: x86_64-apple-darwin
-            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target x86_64-apple-darwin
           # Linux x64 GNU (native build)
-          - host: ubuntu-latest
+          - host: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target x86_64-unknown-linux-gnu
-          # Linux arm64 GNU (cross-compile with napi-cross)
-          - host: ubuntu-latest
+          # Linux arm64 GNU (native build on arm64 runner)
+          - host: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
-            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target aarch64-unknown-linux-gnu --use-napi-cross
 
     name: Build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
@@ -80,22 +76,11 @@ jobs:
           restore-keys: |
             cargo-registry-
 
-      - name: Clean target for cross-builds
-        run: rm -rf target/${{ matrix.settings.target }}/release/gust* || true
-
-      - name: Install Docker
-        if: contains(matrix.settings.build, '--use-napi-cross')
-        uses: docker/setup-qemu-action@v3
-
-      - name: Setup Docker Buildx
-        if: contains(matrix.settings.build, '--use-napi-cross')
-        uses: docker/setup-buildx-action@v3
-
       - name: Install dependencies
         run: bun install
 
-      - name: Build
-        run: ${{ matrix.settings.build }}
+      - name: Build native binding
+        run: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target ${{ matrix.settings.target }}
         env:
           MACOSX_DEPLOYMENT_TARGET: '10.13'
 
@@ -147,7 +132,9 @@ jobs:
           - target: x86_64-apple-darwin
             host: macos-13
           - target: x86_64-unknown-linux-gnu
-            host: ubuntu-latest
+            host: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            host: ubuntu-24.04-arm
 
     runs-on: ${{ matrix.settings.host }}
 
