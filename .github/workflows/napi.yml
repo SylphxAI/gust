@@ -40,27 +40,27 @@ jobs:
           # Darwin arm64 (Apple Silicon)
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: npm run build:napi -- --target aarch64-apple-darwin
+            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target aarch64-apple-darwin
           # Darwin x64 (Intel macOS)
           - host: macos-13
             target: x86_64-apple-darwin
-            build: npm run build:napi -- --target x86_64-apple-darwin
+            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target x86_64-apple-darwin
           # Linux x64 GNU
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build: npm run build:napi -- --target x86_64-unknown-linux-gnu
+            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target x86_64-unknown-linux-gnu
           # Linux x64 musl (Alpine)
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            build: npm run build:napi -- --target x86_64-unknown-linux-musl --use-zig
+            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target x86_64-unknown-linux-musl --use-napi-cross
           # Linux arm64 GNU
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            build: npm run build:napi -- --target aarch64-unknown-linux-gnu --use-cross
+            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target aarch64-unknown-linux-gnu --use-napi-cross
           # Linux arm64 musl
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            build: npm run build:napi -- --target aarch64-unknown-linux-musl --use-zig
+            build: cd crates/gust-napi && npx napi build --release --platform --dts index.d.ts --js false --target aarch64-unknown-linux-musl --use-napi-cross
 
     name: Build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
@@ -89,23 +89,13 @@ jobs:
           restore-keys: |
             ${{ matrix.settings.target }}-cargo-
 
-      - name: Setup Zig
-        if: contains(matrix.settings.build, '--use-zig')
-        uses: mlugg/setup-zig@v1
-        with:
-          version: 0.13.0
+      - name: Install Docker
+        if: contains(matrix.settings.build, '--use-napi-cross')
+        uses: docker/setup-qemu-action@v3
 
-      - name: Install cargo-zigbuild
-        if: contains(matrix.settings.build, '--use-zig')
-        run: cargo install cargo-zigbuild
-
-      - name: Install cross
-        if: contains(matrix.settings.build, '--use-cross')
-        run: cargo install cross --git https://github.com/cross-rs/cross
-
-      - name: Install musl tools
-        if: contains(matrix.settings.target, 'musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Setup Docker Buildx
+        if: contains(matrix.settings.build, '--use-napi-cross')
+        uses: docker/setup-buildx-action@v3
 
       - name: Install dependencies
         run: bun install
@@ -118,10 +108,11 @@ jobs:
       - name: Move artifact to npm directory
         shell: bash
         run: |
-          # Find the built .node file
-          NODE_FILE=$(ls crates/gust-napi/*.node 2>/dev/null || echo "")
+          # Find the built gust-napi .node file (exclude index.node from bun install)
+          NODE_FILE=$(ls crates/gust-napi/gust-napi.*.node 2>/dev/null || echo "")
           if [ -z "$NODE_FILE" ]; then
-            echo "No .node file found!"
+            echo "No gust-napi.*.node file found!"
+            ls -la crates/gust-napi/
             exit 1
           fi
 
