@@ -520,40 +520,50 @@ export const createApp = <App = Record<string, never>>(config: AppConfig<App>): 
 			}
 		}
 
-		// Convert NativeHandlerContext to RawContext
-		const body = Buffer.from(nativeCtx.body)
-		const raw: RawContext = {
-			method: nativeCtx.method,
-			path: nativeCtx.path,
-			query: nativeCtx.query,
-			headers: nativeCtx.headers,
-			params: nativeCtx.params,
-			body,
-			json: <T>() => {
-				try {
-					return JSON.parse(body.toString()) as T
-				} catch {
-					return {} as T
-				}
-			},
-			raw: body,
-			socket: null, // Not available in native path
+		try {
+			// Convert NativeHandlerContext to RawContext
+			const body = Buffer.from(nativeCtx.body)
+			const raw: RawContext = {
+				method: nativeCtx.method,
+				path: nativeCtx.path,
+				query: nativeCtx.query,
+				headers: nativeCtx.headers,
+				params: nativeCtx.params,
+				body,
+				json: <T>() => {
+					try {
+						return JSON.parse(body.toString()) as T
+					} catch {
+						return {} as T
+					}
+				},
+				raw: body,
+				socket: null, // Not available in native path
+			}
+
+			// Create app context
+			const app = contextProvider ? await contextProvider(raw) : ({} as App)
+			const ctx = withApp(raw, app)
+
+			// Create handler that just calls the matched handler
+			const directHandler: Handler<typeof ctx> = async (c) => {
+				// Call handler with auto-detection (supports both Gust and fetch-style)
+				return callHandler(h, c, undefined)
+			}
+
+			// Apply middleware if present
+			const finalHandler = middleware ? middleware<App>(directHandler) : directHandler
+
+			// Await to catch async errors
+			return await finalHandler(ctx)
+		} catch (error) {
+			console.error('Handler invocation error:', error)
+			return {
+				status: 500,
+				headers: { 'content-type': 'text/plain' },
+				body: 'Internal Server Error',
+			}
 		}
-
-		// Create app context
-		const app = contextProvider ? await contextProvider(raw) : ({} as App)
-		const ctx = withApp(raw, app)
-
-		// Create handler that just calls the matched handler
-		const directHandler: Handler<typeof ctx> = async (c) => {
-			// Call handler with auto-detection (supports both Gust and fetch-style)
-			return callHandler(h, c, undefined)
-		}
-
-		// Apply middleware if present
-		const finalHandler = middleware ? middleware<App>(directHandler) : directHandler
-
-		return finalHandler(ctx)
 	}
 
 	return {
