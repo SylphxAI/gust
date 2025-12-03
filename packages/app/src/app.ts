@@ -353,6 +353,18 @@ const createRouterHandler = <App>(
 // ============================================================================
 
 /**
+ * Convert Express-style path to matchit-style path
+ *
+ * Express/JS uses: /users/:id, /files/*path
+ * matchit (Rust) uses: /users/{id}, /files/{*path}
+ */
+const toMatchitPath = (path: string): string => {
+	return path
+		.replace(/:([^/]+)/g, '{$1}') // :id -> {id}
+		.replace(/\*([^/]*)/g, '{*$1}') // *path -> {*path}
+}
+
+/**
  * Build route manifest from route definitions
  * Used by Rust server to register routes
  */
@@ -367,7 +379,7 @@ const buildManifest = <App>(routes: Route<string, string, App>[]): RouteManifest
 
 		entries.push({
 			method: route.method,
-			path: route.path,
+			path: toMatchitPath(route.path), // Convert to matchit syntax for Rust
 			handlerId: i,
 			hasParams,
 			hasWildcard,
@@ -378,7 +390,7 @@ const buildManifest = <App>(routes: Route<string, string, App>[]): RouteManifest
 			for (const method of WILDCARD_METHODS) {
 				entries.push({
 					method,
-					path: route.path,
+					path: toMatchitPath(route.path), // Convert to matchit syntax for Rust
 					handlerId: i,
 					hasParams,
 					hasWildcard,
