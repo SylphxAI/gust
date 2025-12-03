@@ -1,0 +1,56 @@
+{
+	"name": "@sylphx/gust-napi",
+	"version": "0.1.0",
+	"description": "High-performance HTTP server framework - Native Node.js bindings",
+	"type": "module",
+	"main": "./index.js",
+	"types": "./index.d.ts",
+	"files": [
+		"index.js",
+		"index.d.ts"
+	],
+	"napi": {
+		"name": "gust-napi",
+		"triples": {
+			"defaults": false,
+			"additional": [
+				"aarch64-apple-darwin",
+				"x86_64-apple-darwin",
+				"x86_64-unknown-linux-gnu",
+				"x86_64-unknown-linux-musl",
+				"aarch64-unknown-linux-gnu",
+				"aarch64-unknown-linux-musl"
+			]
+		}
+	},
+	"engines": {
+		"node": ">= 18.0.0"
+	},
+	"optionalDependencies": {
+		"@sylphx/gust-napi-darwin-arm64": "0.1.0",
+		"@sylphx/gust-napi-darwin-x64": "0.1.0",
+		"@sylphx/gust-napi-linux-x64-gnu": "0.1.0",
+		"@sylphx/gust-napi-linux-x64-musl": "0.1.0",
+		"@sylphx/gust-napi-linux-arm64-gnu": "0.1.0",
+		"@sylphx/gust-napi-linux-arm64-musl": "0.1.0"
+	},
+	"keywords": [
+		"gust",
+		"sylphx",
+		"http",
+		"server",
+		"native",
+		"napi",
+		"rust",
+		"performance"
+	],
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/SylphxAI/gust"
+	},
+	"publishConfig": {
+		"registry": "https://registry.npmjs.org",
+		"access": "public"
+	}
+}

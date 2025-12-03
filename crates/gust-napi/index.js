@@ -36,7 +36,7 @@ switch (platform) {
 					if (localFileExisted) {
 						nativeBinding = require('./gust-napi.darwin-arm64.node')
 					} else {
-						nativeBinding = require('@gust/napi-darwin-arm64')
+						nativeBinding = require('@sylphx/gust-napi-darwin-arm64')
 					}
 				} catch (e) {
 					loadError = e
@@ -48,7 +48,7 @@ switch (platform) {
 					if (localFileExisted) {
 						nativeBinding = require('./gust-napi.darwin-x64.node')
 					} else {
-						nativeBinding = require('@gust/napi-darwin-x64')
+						nativeBinding = require('@sylphx/gust-napi-darwin-x64')
 					}
 				} catch (e) {
 					loadError = e
@@ -67,7 +67,7 @@ switch (platform) {
 						if (localFileExisted) {
 							nativeBinding = require('./gust-napi.linux-x64-musl.node')
 						} else {
-							nativeBinding = require('@gust/napi-linux-x64-musl')
+							nativeBinding = require('@sylphx/gust-napi-linux-x64-musl')
 						}
 					} catch (e) {
 						loadError = e
@@ -78,7 +78,7 @@ switch (platform) {
 						if (localFileExisted) {
 							nativeBinding = require('./gust-napi.linux-x64-gnu.node')
 						} else {
-							nativeBinding = require('@gust/napi-linux-x64-gnu')
+							nativeBinding = require('@sylphx/gust-napi-linux-x64-gnu')
 						}
 					} catch (e) {
 						loadError = e
@@ -92,7 +92,7 @@ switch (platform) {
 						if (localFileExisted) {
 							nativeBinding = require('./gust-napi.linux-arm64-musl.node')
 						} else {
-							nativeBinding = require('@gust/napi-linux-arm64-musl')
+							nativeBinding = require('@sylphx/gust-napi-linux-arm64-musl')
 						}
 					} catch (e) {
 						loadError = e
@@ -103,7 +103,7 @@ switch (platform) {
 						if (localFileExisted) {
 							nativeBinding = require('./gust-napi.linux-arm64-gnu.node')
 						} else {
-							nativeBinding = require('@gust/napi-linux-arm64-gnu')
+							nativeBinding = require('@sylphx/gust-napi-linux-arm64-gnu')
 						}
 					} catch (e) {
 						loadError = e

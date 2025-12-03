@@ -1,0 +1,38 @@
+{
+	"name": "@sylphx/gust-napi-linux-x64-musl",
+	"version": "0.1.0",
+	"os": [
+		"linux"
+	],
+	"cpu": [
+		"x64"
+	],
+	"libc": [
+		"musl"
+	],
+	"main": "./gust-napi.linux-x64-musl.node",
+	"files": [
+		"gust-napi.linux-x64-musl.node"
+	],
+	"description": "High-performance HTTP server framework - Linux x64 musl native bindings",
+	"keywords": [
+		"gust",
+		"sylphx",
+		"napi",
+		"rust",
+		"server",
+		"http"
+	],
+	"license": "MIT",
+	"engines": {
+		"node": ">= 18.0.0"
+	},
+	"publishConfig": {
+		"registry": "https://registry.npmjs.org",
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/SylphxAI/gust"
+	}
+}

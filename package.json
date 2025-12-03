@@ -12,6 +12,8 @@
 	],
 	"scripts": {
 		"build:wasm": "cd packages/core && bun run build:wasm",
+		"build:napi": "cd crates/gust-napi && napi build --release --platform --dts index.d.ts --js false",
+		"test:napi": "node -e \"const m = require('./crates/gust-napi/index.js'); console.log('Loaded:', Object.keys(m));\"",
 		"example": "bun run packages/gust/examples/basic.ts",
 		"lint": "biome check .",
 		"format": "biome format --write .",

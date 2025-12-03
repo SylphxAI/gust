@@ -1,0 +1,35 @@
+{
+	"name": "@sylphx/gust-napi-darwin-x64",
+	"version": "0.1.0",
+	"os": [
+		"darwin"
+	],
+	"cpu": [
+		"x64"
+	],
+	"main": "./gust-napi.darwin-x64.node",
+	"files": [
+		"gust-napi.darwin-x64.node"
+	],
+	"description": "High-performance HTTP server framework - Darwin x64 native bindings",
+	"keywords": [
+		"gust",
+		"sylphx",
+		"napi",
+		"rust",
+		"server",
+		"http"
+	],
+	"license": "MIT",
+	"engines": {
+		"node": ">= 18.0.0"
+	},
+	"publishConfig": {
+		"registry": "https://registry.npmjs.org",
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/SylphxAI/gust"
+	}
+}

@@ -1,0 +1,211 @@
+name: Build Native
+
+env:
+  DEBUG: 'napi:*'
+  MACOSX_DEPLOYMENT_TARGET: '10.13'
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/napi.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/napi.yml'
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to npm'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          # Darwin arm64 (Apple Silicon)
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            build: npm run build:napi -- --target aarch64-apple-darwin
+          # Darwin x64 (Intel macOS)
+          - host: macos-13
+            target: x86_64-apple-darwin
+            build: npm run build:napi -- --target x86_64-apple-darwin
+          # Linux x64 GNU
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            build: npm run build:napi -- --target x86_64-unknown-linux-gnu
+          # Linux x64 musl (Alpine)
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build: npm run build:napi -- --target x86_64-unknown-linux-musl --use-zig
+          # Linux arm64 GNU
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            build: npm run build:napi -- --target aarch64-unknown-linux-gnu --use-cross
+          # Linux arm64 musl
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            build: npm run build:napi -- --target aarch64-unknown-linux-musl --use-zig
+
+    name: Build - ${{ matrix.settings.target }}
+    runs-on: ${{ matrix.settings.host }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.settings.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.settings.target }}-cargo-
+
+      - name: Setup Zig
+        if: contains(matrix.settings.build, '--use-zig')
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.13.0
+
+      - name: Install cargo-zigbuild
+        if: contains(matrix.settings.build, '--use-zig')
+        run: cargo install cargo-zigbuild
+
+      - name: Install cross
+        if: contains(matrix.settings.build, '--use-cross')
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: ${{ matrix.settings.build }}
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '10.13'
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: crates/gust-napi/npm/*/*.node
+          if-no-files-found: error
+
+  test:
+    name: Test - ${{ matrix.settings.target }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - target: aarch64-apple-darwin
+            host: macos-latest
+          - target: x86_64-apple-darwin
+            host: macos-13
+          - target: x86_64-unknown-linux-gnu
+            host: ubuntu-latest
+
+    runs-on: ${{ matrix.settings.host }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: crates/gust-napi/npm
+
+      - name: Test bindings
+        run: bun run test:napi
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    needs: [build, test]
+    if: github.event.inputs.publish == 'true' || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[publish-napi]'))
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: crates/gust-napi/npm
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -laR crates/gust-napi/npm
+
+      - name: Publish platform packages
+        run: |
+          cd crates/gust-napi/npm
+          for dir in */; do
+            if [ -f "$dir/package.json" ]; then
+              echo "Publishing $dir..."
+              cd "$dir"
+              npm publish --access public --provenance || true
+              cd ..
+            fi
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish main package
+        run: |
+          cd crates/gust-napi
+          npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
