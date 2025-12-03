@@ -17,7 +17,7 @@ import type { Context } from './context'
  * Symbol to mark handlers that expect Fetch-style invocation (Request → Response)
  * Used by callHandler() to dispatch correctly without try-catch
  */
-export const FETCH_HANDLER_MARKER = Symbol.for('gust.fetchHandler')
+export const FETCH_HANDLER_MARKER: symbol = Symbol.for('gust.fetchHandler')
 
 /**
  * Check if a handler is marked as Fetch-style
@@ -26,7 +26,7 @@ export const isFetchHandler = (handler: unknown): boolean => {
 	return (
 		typeof handler === 'function' &&
 		FETCH_HANDLER_MARKER in handler &&
-		(handler as Record<symbol, boolean>)[FETCH_HANDLER_MARKER] === true
+		(handler as unknown as Record<symbol, boolean>)[FETCH_HANDLER_MARKER] === true
 	)
 }
 
