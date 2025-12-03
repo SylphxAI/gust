@@ -1,6 +1,6 @@
 {
 	"name": "@sylphx/gust",
-	"version": "0.1.8",
+	"version": "0.1.9",
 	"description": "High-performance HTTP server framework - stateless app + Rust-powered server",
 	"type": "module",
 	"main": "dist/index.js",

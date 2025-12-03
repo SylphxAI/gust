@@ -1,6 +1,6 @@
 {
 	"name": "@sylphx/gust-core",
-	"version": "0.1.8",
+	"version": "0.1.9",
 	"description": "WASM HTTP parser and Radix Trie router - works in browser and server",
 	"type": "module",
 	"files": [
