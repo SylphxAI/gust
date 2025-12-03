@@ -106,8 +106,8 @@ const jitCompileHandler = (
 
 	// SPECIAL CASE: Single GET route to "/" - ultra-optimized path
 	if (staticRoutes.length === 1 && dynamicRoutes.length === 0) {
-		const route = staticRoutes[0]!
-		if (route.method === 'GET' && route.path === '/') {
+		const route = staticRoutes[0]
+		if (route && route.method === 'GET' && route.path === '/') {
 			const handler = route.handler
 			// Inline everything - no function calls except the handler
 			return (req: Request) => {
@@ -188,8 +188,8 @@ const jitCompileHandler = (
 
 		// Dynamic routes
 		for (let i = 0; i < dynamicPatterns.length; i++) {
-			const r = dynamicPatterns[i]!
-			if (r.method === method && r.pattern.test(path)) {
+			const r = dynamicPatterns[i]
+			if (r && r.method === method && r.pattern.test(path)) {
 				return r.handler(req)
 			}
 		}
@@ -247,26 +247,33 @@ export const compileRoutes = (
  * Create a JIT-compiled router
  * Generates specialized handler code at startup for maximum performance
  */
-export const turboRouter = (config: TurboRouterConfig) => {
+export const turboRouter = (config: TurboRouterConfig): { handler: TurboHandler } => {
 	const routes = parseRoutes(config.routes)
 	const notFound = config.notFound ?? (() => RESPONSE_404)
 	const onError = config.onError ?? (() => RESPONSE_500)
 
 	// JIT compile the handler
-	const handler = jitCompileHandler(routes, notFound, onError)
+	const handler: TurboHandler = jitCompileHandler(routes, notFound, onError)
 
-	return { handler }
+	return { handler: handler }
 }
 
 // ============================================================================
 // Turbo Serve - Direct Bun.serve wrapper
 // ============================================================================
 
+/** Return type for turboServe */
+export interface TurboServerHandle {
+	readonly port: number
+	readonly hostname: string
+	readonly stop: () => void
+}
+
 /**
  * Start server using Bun.serve directly
  * Zero framework overhead - just routing
  */
-export const turboServe = (options: TurboServeOptions) => {
+export const turboServe = (options: TurboServeOptions): TurboServerHandle => {
 	const port = options.port ?? 3000
 	const hostname = options.hostname ?? '0.0.0.0'
 
@@ -282,10 +289,16 @@ export const turboServe = (options: TurboServeOptions) => {
 
 	options.onListen?.({ port, hostname })
 
+	const serverPort: number = server.port ?? port
+	const serverHostname: string = server.hostname ?? hostname
+	const stop = (): void => {
+		server.stop()
+	}
+
 	return {
-		port: server.port,
-		hostname: server.hostname,
-		stop: () => server.stop(),
+		port: serverPort,
+		hostname: serverHostname,
+		stop: stop,
 	}
 }
 
@@ -361,22 +374,35 @@ export const singleRoute = (handler: () => Response | Promise<Response>): TurboH
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS'
 
+/** Route definition type */
+export type TurboRoute = Record<string, TurboHandler>
+
 /** Create a typed route */
-export const route = <M extends HttpMethod>(method: M, path: string, handler: TurboHandler) => ({
-	[`${method} ${path}`]: handler,
-})
+export const route = <M extends HttpMethod>(
+	method: M,
+	path: string,
+	handler: TurboHandler
+): TurboRoute => {
+	const key = `${method} ${path}`
+	const result: TurboRoute = {}
+	result[key] = handler
+	return result
+}
 
 /** GET route */
-export const get = (path: string, handler: TurboHandler) => route('GET', path, handler)
+export const get = (path: string, handler: TurboHandler): TurboRoute => route('GET', path, handler)
 
 /** POST route */
-export const post = (path: string, handler: TurboHandler) => route('POST', path, handler)
+export const post = (path: string, handler: TurboHandler): TurboRoute =>
+	route('POST', path, handler)
 
 /** PUT route */
-export const put = (path: string, handler: TurboHandler) => route('PUT', path, handler)
+export const put = (path: string, handler: TurboHandler): TurboRoute => route('PUT', path, handler)
 
 /** DELETE route */
-export const del = (path: string, handler: TurboHandler) => route('DELETE', path, handler)
+export const del = (path: string, handler: TurboHandler): TurboRoute =>
+	route('DELETE', path, handler)
 
 /** PATCH route */
-export const patch = (path: string, handler: TurboHandler) => route('PATCH', path, handler)
+export const patch = (path: string, handler: TurboHandler): TurboRoute =>
+	route('PATCH', path, handler)

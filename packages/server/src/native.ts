@@ -608,17 +608,29 @@ export const staticRoute = <TPath extends string>(
 	}
 }
 
+/** Return type for static route helpers */
+export type StaticRouteResult<TPath extends string> = {
+	method: string
+	path: TPath
+	handler: () => ServerResponse
+	static: StaticRouteConfig
+}
+
 /**
  * Static GET route helper
  */
-export const staticGet = <TPath extends string>(path: TPath, response: ServerResponse) =>
-	staticRoute('GET', path, response)
+export const staticGet = <TPath extends string>(
+	path: TPath,
+	response: ServerResponse
+): StaticRouteResult<TPath> => staticRoute('GET', path, response)
 
 /**
  * Static POST route helper
  */
-export const staticPost = <TPath extends string>(path: TPath, response: ServerResponse) =>
-	staticRoute('POST', path, response)
+export const staticPost = <TPath extends string>(
+	path: TPath,
+	response: ServerResponse
+): StaticRouteResult<TPath> => staticRoute('POST', path, response)
 
 // ============================================================================
 // Native Server Wrapper
