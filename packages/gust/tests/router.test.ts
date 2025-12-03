@@ -209,7 +209,7 @@ describe('Router', () => {
 		})
 
 		it('should provide all HTTP method builders', () => {
-			const router = createRouter<{}>()
+			const router = createRouter<Record<string, never>>()
 
 			expect(router.get).toBeDefined()
 			expect(router.post).toBeDefined()
@@ -222,7 +222,7 @@ describe('Router', () => {
 		})
 
 		it('should create routes with correct methods', () => {
-			const router = createRouter<{}>()
+			const router = createRouter<Record<string, never>>()
 
 			expect(router.get('/a', () => text('ok')).method).toBe('GET')
 			expect(router.post('/a', () => text('ok')).method).toBe('POST')
@@ -235,14 +235,14 @@ describe('Router', () => {
 		})
 
 		it('should preserve paths with params', () => {
-			const { get: typedGet } = createRouter<{}>()
+			const { get: typedGet } = createRouter<Record<string, never>>()
 
 			const user = typedGet('/users/:id', ({ ctx }) => json({ id: ctx.params.id }))
 			expect(user.path).toBe('/users/:id')
 		})
 
 		it('should allow multiple params in path', () => {
-			const { get: typedGet } = createRouter<{}>()
+			const { get: typedGet } = createRouter<Record<string, never>>()
 
 			const comment = typedGet('/posts/:postId/comments/:commentId', ({ ctx }) =>
 				json({ postId: ctx.params.postId, commentId: ctx.params.commentId })

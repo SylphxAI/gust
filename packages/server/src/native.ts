@@ -402,24 +402,24 @@ export interface ResponseData {
 	body: string
 }
 
-/** Route entry for Rust router registration */
+/** Route entry for Rust router registration (napi-rs auto-converts to camelCase) */
 export interface NativeRouteEntry {
 	method: string
 	path: string
-	handler_id: number
-	has_params: boolean
-	has_wildcard: boolean
+	handlerId: number
+	hasParams: boolean
+	hasWildcard: boolean
 }
 
-/** Route manifest for Rust router registration */
+/** Route manifest for Rust router registration (napi-rs auto-converts to camelCase) */
 export interface NativeRouteManifest {
 	routes: NativeRouteEntry[]
-	handler_count: number
+	handlerCount: number
 }
 
-/** Input for invoke handler callback from Rust */
+/** Input for invoke handler callback from Rust (napi-rs auto-converts to camelCase) */
 export interface NativeInvokeHandlerInput {
-	handler_id: number
+	handlerId: number
 	ctx: {
 		method: string
 		path: string

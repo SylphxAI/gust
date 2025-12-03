@@ -15,12 +15,10 @@
 import { createServer, type Server as NetServer, type Socket } from 'node:net'
 import { createServer as createTlsServer, type TLSSocket, type Server as TlsServer } from 'node:tls'
 import {
-	type Context,
 	type ContextProvider,
 	createApp,
 	createRawContext,
 	type GustApp,
-	type InvokeHandlerInput,
 	type Middleware,
 	parseHeaders,
 	type RawContext,
@@ -28,7 +26,12 @@ import {
 } from '@sylphx/gust-app'
 import type { Handler, ServerResponse, WasmCore } from '@sylphx/gust-core'
 import { getWasm, initWasm, isStreamingBody, serverError } from '@sylphx/gust-core'
-import { isNativeAvailable, isTlsAvailable, loadNativeBinding } from './native'
+import {
+	isNativeAvailable,
+	isTlsAvailable,
+	loadNativeBinding,
+	type NativeInvokeHandlerInput,
+} from './native'
 
 // Default keep-alive timeout (5 seconds)
 const DEFAULT_KEEP_ALIVE_TIMEOUT = 5000
@@ -272,27 +275,28 @@ const serveNative = async <App>(
 		// NEW: Route Registration Pattern (when GustApp is provided)
 		// This enables Rust-side routing with minimal JS overhead
 		if (options.app) {
-			// Convert manifest to native format
+			// Convert manifest to native format (napi-rs uses camelCase)
 			const nativeManifest = {
 				routes: options.app.manifest.routes.map((r) => ({
 					method: r.method,
 					path: r.path,
-					handler_id: r.handlerId,
-					has_params: r.hasParams,
-					has_wildcard: r.hasWildcard,
+					handlerId: r.handlerId,
+					hasParams: r.hasParams,
+					hasWildcard: r.hasWildcard,
 				})),
-				handler_count: options.app.manifest.handlerCount,
+				handlerCount: options.app.manifest.handlerCount,
 			}
 
 			// Register routes in Rust router
 			await server.registerRoutes(nativeManifest)
 
 			// Set invoke handler callback
-			// Rust will call this with (input: { handler_id, ctx }) for matched routes
-			server.setInvokeHandler(async (input: InvokeHandlerInput) => {
+			// Rust will call this with (input: { handlerId, ctx }) for matched routes
+			// Note: napi-rs auto-converts snake_case to camelCase
+			server.setInvokeHandler(async (input: NativeInvokeHandlerInput) => {
 				try {
 					// biome-ignore lint/style/noNonNullAssertion: app is checked above
-					const response = await options.app!.invokeHandler(input.handler_id, input.ctx)
+					const response = await options.app!.invokeHandler(input.handlerId, input.ctx)
 
 					// Convert ServerResponse to native format
 					const headers: Record<string, string> = {}

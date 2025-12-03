@@ -46,7 +46,7 @@ export type SSEGenerator = () => AsyncGenerator<SSEEvent>
 /**
  * Handler source: push-based, calls emit()
  */
-export type SSEHandler = (emit: SSEEmit) => Promise<void | SSECleanup>
+export type SSEHandler = (emit: SSEEmit) => Promise<undefined | SSECleanup>
 
 /**
  * Source type for unified events() API
@@ -249,7 +249,7 @@ export const sse = (source: SSESource, options?: SSEOptions): ServerResponse => 
 	} else {
 		// Push-based: convert handler to async iterator using queue
 		const { push, done, error, iterator } = createAsyncQueue<SSEEvent>()
-		let cleanup: SSECleanup | void
+		let cleanup: SSECleanup | undefined
 
 		// Start handler in background
 		;(async () => {

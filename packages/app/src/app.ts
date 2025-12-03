@@ -159,9 +159,10 @@ export interface NativeHandlerContext {
 /**
  * Input for invoke handler callback from Rust
  * Wraps handlerId and context for clean marshalling
+ * Note: napi-rs auto-converts snake_case to camelCase
  */
 export interface InvokeHandlerInput {
-	readonly handler_id: number
+	readonly handlerId: number
 	readonly ctx: NativeHandlerContext
 }
 
