@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.9 (2025-12-03)
+
+### ✨ Features
+
+- **benchmarks:** add fair comparison with static/dynamic route separation ([bcb1b91](https://github.com/SylphxAI/gust/commit/bcb1b91d50883c2b1276647d5bfea481acb78b3b))
+
+### 🐛 Bug Fixes
+
+- **deps:** add @sylphx/gust-core as devDependency for tests ([e77bb83](https://github.com/SylphxAI/gust/commit/e77bb834aba4fde57beb7b1e3d029b0d702044c7))
+
+### ♻️ Refactoring
+
+- clean architecture and remove 14k lines of duplicate code ([8f3bb35](https://github.com/SylphxAI/gust/commit/8f3bb354ddced99a829b15807b143f919577a429))
+- rename packages/serve to packages/gust ([318d2a0](https://github.com/SylphxAI/gust/commit/318d2a06243152ab40cda842c429da37eed5570e))
+
+### 📚 Documentation
+
+- add external handler integration documentation ([bb8532d](https://github.com/SylphxAI/gust/commit/bb8532d91a02578d63fc019854bfe0169b659c55))
+
+### 📦 Build
+
+- add per-package tsconfig.json for isolated typecheck ([eebc220](https://github.com/SylphxAI/gust/commit/eebc22034ad93eb6e26ec95f71f3a2435cc5304d))
+
 ## 0.1.8 (2025-12-03)
 
 ### ✨ Features
