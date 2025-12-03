@@ -9,4 +9,12 @@ jobs:
     uses: SylphxAI/.github/.github/workflows/release.yml@main
     with:
       prebuild: bun run build
+      postpublish: |
+        # Sync NAPI package versions with main package
+        VERSION=$(jq -r .version packages/gust/package.json)
+        echo "Syncing NAPI packages to version $VERSION"
+        cd crates/gust-napi && npx napi version $VERSION --skip-gh-release
+
+        # Trigger NAPI publish workflow
+        gh workflow run napi.yml -f publish=true
     secrets: inherit
