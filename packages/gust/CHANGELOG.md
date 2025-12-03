@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.11 (2025-12-03)
+
+### ✨ Features
+
+- **gust:** update package description for native bindings ([9a50213](https://github.com/SylphxAI/gust/commit/9a50213a24ba6c59d3dcd0108d6d13eb839962c9))
+
 ## 0.1.10 (2025-12-03)
 
 ### ✨ Features
