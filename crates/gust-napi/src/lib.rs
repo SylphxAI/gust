@@ -1798,13 +1798,24 @@ async fn handle_request(
                 // OPTIMIZATION: Check if we can skip body reading entirely (GET/HEAD have no body)
                 let skip_body = method == Method::Get || method == Method::Head;
 
-                // Collect headers with pre-allocated capacity
-                let mut headers_map: HashMap<String, String> = HashMap::with_capacity(req.headers().len());
-                for (name, value) in req.headers() {
-                    if let Ok(v) = value.to_str() {
-                        headers_map.insert(name.as_str().to_lowercase(), v.to_string());
+                // OPTIMIZATION: Sucrose-style - skip header collection for simple GET/HEAD routes
+                // If route has no params and is GET/HEAD, handler likely doesn't need headers
+                let skip_headers = skip_body && params.is_empty();
+
+                // Collect headers only if needed (Sucrose-style optimization)
+                let headers_map: HashMap<String, String> = if skip_headers {
+                    // Fast path: empty headers for simple GET/HEAD without params
+                    HashMap::new()
+                } else {
+                    // Full path: collect headers with pre-allocated capacity
+                    let mut map = HashMap::with_capacity(req.headers().len());
+                    for (name, value) in req.headers() {
+                        if let Ok(v) = value.to_str() {
+                            map.insert(name.as_str().to_lowercase(), v.to_string());
+                        }
                     }
-                }
+                    map
+                };
 
                 // OPTIMIZATION: Skip body size check and reading for GET/HEAD
                 let body_bytes = if skip_body {
