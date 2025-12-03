@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::RwLock;
+use arc_swap::ArcSwap;
 
 // Use mimalloc for better performance
 #[global_allocator]
@@ -1031,9 +1032,11 @@ struct ServerState {
     /// Dynamic routes (JS handlers) - legacy pattern
     dynamic_routes: RwLock<Router<DynamicHandler>>,
     /// App routes (handler ID based) - new pattern from GustApp.manifest
-    app_routes: RwLock<Router<u32>>,
+    /// Using ArcSwap for lock-free reads on hot path
+    app_routes: ArcSwap<Router<u32>>,
     /// Invoke handler callback - calls GustApp.invokeHandler(id, ctx)
-    invoke_handler: RwLock<Option<InvokeHandler>>,
+    /// Using ArcSwap for lock-free reads on hot path (massive perf improvement)
+    invoke_handler: ArcSwap<Option<InvokeHandler>>,
     /// Middleware chain
     middleware: RwLock<MiddlewareChain>,
     /// Fallback handler for unmatched routes
@@ -1065,8 +1068,8 @@ impl ServerState {
         Self {
             static_routes: RwLock::new(Router::new()),
             dynamic_routes: RwLock::new(Router::new()),
-            app_routes: RwLock::new(Router::new()),
-            invoke_handler: RwLock::new(None),
+            app_routes: ArcSwap::new(Arc::new(Router::new())),
+            invoke_handler: ArcSwap::new(Arc::new(None)),
             middleware: RwLock::new(MiddlewareChain::new()),
             fallback_handler: RwLock::new(None),
             compression: RwLock::new(None),
@@ -1403,17 +1406,20 @@ impl GustServer {
     /// ```
     #[napi]
     pub async fn register_routes(&self, manifest: RouteManifest) -> Result<()> {
-        let mut routes = self.state.app_routes.write().await;
+        // Build new router - this happens at startup, not on hot path
+        let mut new_router = Router::new();
 
         for entry in manifest.routes {
             let method = Method::from_str(&entry.method)
                 .map_err(|e| Error::from_reason(e.to_string()))?;
 
-            routes
+            new_router
                 .route(method, &entry.path, entry.handler_id)
                 .map_err(|e| Error::from_reason(e.to_string()))?;
         }
 
+        // Atomic swap with ArcSwap - lock-free on read path
+        self.state.app_routes.store(Arc::new(new_router));
         Ok(())
     }
 
@@ -1441,7 +1447,8 @@ impl GustServer {
             })?;
 
         let invoke = InvokeHandler { callback: tsfn };
-        *self.state.invoke_handler.blocking_write() = Some(invoke);
+        // Use ArcSwap for lock-free atomic swap
+        self.state.invoke_handler.store(Arc::new(Some(invoke)));
         Ok(())
     }
 
@@ -1449,14 +1456,15 @@ impl GustServer {
     /// Returns true if invoke_handler is set
     #[napi]
     pub fn has_app_routes(&self) -> bool {
-        self.state.invoke_handler.blocking_read().is_some()
+        // Lock-free read with ArcSwap
+        self.state.invoke_handler.load().is_some()
     }
 
     /// Clear all app routes (for hot reload)
     #[napi]
-    pub async fn clear_app_routes(&self) -> Result<()> {
-        let mut routes = self.state.app_routes.write().await;
-        *routes = Router::new();
+    pub fn clear_app_routes(&self) -> Result<()> {
+        // Atomic swap with ArcSwap - lock-free
+        self.state.app_routes.store(Arc::new(Router::new()));
         Ok(())
     }
 
@@ -1770,22 +1778,27 @@ async fn handle_request(
     }
 
     // FAST PATH 2: Check app routes (GustApp pattern - Rust routing, ID-based dispatch)
+    // OPTIMIZED: Lock-free routing + lock-free invoke_handler read + skip body for GET/HEAD
     {
-        let routes = state.app_routes.read().await;
+        // OPTIMIZATION: Lock-free read of app routes using ArcSwap
+        let routes = state.app_routes.load();
         if let Some(matched) = routes.match_route(method, path) {
             let handler_id = matched.value;
             let params = matched.params.clone();
-            drop(routes); // Release lock early
+            // No need to drop - ArcSwap guard is cheap
 
-            // Check if invoke handler is set
-            let invoke = state.invoke_handler.read().await.clone();
-            if let Some(handler) = invoke {
+            // OPTIMIZATION: Lock-free read of invoke handler using ArcSwap
+            let invoke_guard = state.invoke_handler.load();
+            if let Some(ref handler) = **invoke_guard {
                 // Extract all data from req BEFORE consuming it
                 let method_str_owned = method_str.to_string();
                 let path_owned = path.to_string();
                 let query_owned = req.uri().query().unwrap_or("").to_string();
 
-                // Collect headers
+                // OPTIMIZATION: Check if we can skip body reading entirely (GET/HEAD have no body)
+                let skip_body = method == Method::Get || method == Method::Head;
+
+                // Collect headers with pre-allocated capacity
                 let mut headers_map: HashMap<String, String> = HashMap::with_capacity(req.headers().len());
                 for (name, value) in req.headers() {
                     if let Ok(v) = value.to_str() {
@@ -1793,50 +1806,58 @@ async fn handle_request(
                     }
                 }
 
-                // Check body size limit
-                let max_body_size = state.max_body_size.load(Ordering::Relaxed) as usize;
-                if let Some(content_length) = headers_map.get("content-length") {
-                    if let Ok(len) = content_length.parse::<usize>() {
-                        if len > max_body_size {
-                            return Ok(hyper::Response::builder()
-                                .status(413)
-                                .header("content-type", "text/plain")
-                                .body(Full::new(Bytes::from("Request Entity Too Large")))
-                                .unwrap());
+                // OPTIMIZATION: Skip body size check and reading for GET/HEAD
+                let body_bytes = if skip_body {
+                    // GET/HEAD - no body, skip entirely
+                    Bytes::new()
+                } else {
+                    // POST/PUT/PATCH/etc - need to read body
+                    let max_body_size = state.max_body_size.load(Ordering::Relaxed) as usize;
+
+                    // Check body size limit from Content-Length header
+                    if let Some(content_length) = headers_map.get("content-length") {
+                        if let Ok(len) = content_length.parse::<usize>() {
+                            if len > max_body_size {
+                                return Ok(hyper::Response::builder()
+                                    .status(413)
+                                    .header("content-type", "text/plain")
+                                    .body(Full::new(Bytes::from("Request Entity Too Large")))
+                                    .unwrap());
+                            }
                         }
                     }
-                }
 
-                // Read body with timeout (this consumes req)
-                let request_timeout = state.request_timeout_ms.load(Ordering::Relaxed);
-                let body_result = if request_timeout > 0 {
-                    tokio::time::timeout(
-                        Duration::from_millis(request_timeout as u64),
-                        req.collect()
-                    ).await
-                } else {
-                    Ok(req.collect().await)
-                };
+                    // Read body with timeout
+                    let request_timeout = state.request_timeout_ms.load(Ordering::Relaxed);
+                    let body_result = if request_timeout > 0 {
+                        tokio::time::timeout(
+                            Duration::from_millis(request_timeout as u64),
+                            req.collect()
+                        ).await
+                    } else {
+                        Ok(req.collect().await)
+                    };
 
-                let body_bytes = match body_result {
-                    Ok(Ok(collected)) => {
-                        let bytes = collected.to_bytes();
-                        if bytes.len() > max_body_size {
+                    match body_result {
+                        Ok(Ok(collected)) => {
+                            let bytes = collected.to_bytes();
+                            if bytes.len() > max_body_size {
+                                return Ok(hyper::Response::builder()
+                                    .status(413)
+                                    .header("content-type", "text/plain")
+                                    .body(Full::new(Bytes::from("Request Entity Too Large")))
+                                    .unwrap());
+                            }
+                            bytes
+                        },
+                        Ok(Err(_)) => Bytes::new(),
+                        Err(_) => {
                             return Ok(hyper::Response::builder()
-                                .status(413)
+                                .status(408)
                                 .header("content-type", "text/plain")
-                                .body(Full::new(Bytes::from("Request Entity Too Large")))
+                                .body(Full::new(Bytes::from("Request Timeout")))
                                 .unwrap());
                         }
-                        bytes
-                    },
-                    Ok(Err(_)) => Bytes::new(),
-                    Err(_) => {
-                        return Ok(hyper::Response::builder()
-                            .status(408)
-                            .header("content-type", "text/plain")
-                            .body(Full::new(Bytes::from("Request Timeout")))
-                            .unwrap());
                     }
                 };
 

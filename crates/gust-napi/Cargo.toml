@@ -41,6 +41,8 @@ brotli = { version = "7", optional = true }
 futures-util = { version = "0.3", features = ["sink"] }
 pin-project-lite = "0.2"
 async-stream = "0.3"
+# Lock-free atomic swap for hot path optimization
+arc-swap = "1.7"
 
 # io_uring support (Linux only)
 [target.'cfg(target_os = "linux")'.dependencies]
