@@ -36,7 +36,8 @@
 		"napi",
 		"native",
 		"rust",
-		"bun"
+		"bun",
+		"framework"
 	],
 	"license": "MIT",
 	"dependencies": {
