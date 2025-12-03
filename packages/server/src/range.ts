@@ -194,6 +194,11 @@ export const serveRangeFile = async (
 	// Check for Range header
 	const rangeHeader = ctx.headers.range
 
+	// Socket required for streaming
+	if (!ctx.socket) {
+		return response('Socket unavailable for streaming', { status: 500 })
+	}
+
 	// No range - stream entire file
 	if (!rangeHeader) {
 		return streamFile(ctx.socket, filePath, {

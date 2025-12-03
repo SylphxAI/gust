@@ -84,15 +84,16 @@ type GustHandler<App = unknown> = (args: {
  * all('/graphql', fetchHandler(yoga.fetch))
  * ```
  */
-const callHandler = async (
-	handler: GustHandler,
-	ctx: Context<unknown>,
+const callHandler = async <App = unknown>(
+	handler: GustHandler<App> | RouteHandlerFn<App, string>,
+	ctx: Context<App>,
 	input: unknown
 ): Promise<ServerResponse> => {
 	// Fetch-style handlers are already wrapped by fetchHandler()
 	// They accept { ctx, input } but internally use ctx.request
 	// So we can call them uniformly as Gust-style
-	const result = handler({ ctx, input })
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const result = (handler as any)({ ctx, input })
 	return normalizeResponse(result)
 }
 

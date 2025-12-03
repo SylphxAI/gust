@@ -95,7 +95,7 @@ export const fetchHandler = <App = Record<string, never>>(
 	}
 
 	// Mark as fetch-style handler for callHandler() dispatch
-	;(wrapped as Record<symbol, boolean>)[FETCH_HANDLER_MARKER] = true
+	;(wrapped as unknown as Record<symbol, boolean>)[FETCH_HANDLER_MARKER] = true
 
 	return wrapped as RouteHandlerFn<App, string>
 }

@@ -278,7 +278,8 @@ export const serverResponseToResponse = (
 	}
 
 	// Convert body
-	let body: BodyInit | null = null
+	// BodyInit can be string, Blob, ArrayBuffer, DataView, TypedArray, FormData, URLSearchParams, ReadableStream
+	let body: string | Uint8Array | Blob | ReadableStream | null = null
 	if (response.body !== null && response.body !== undefined) {
 		if (typeof response.body === 'string') {
 			body = response.body

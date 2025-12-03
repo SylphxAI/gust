@@ -37,7 +37,7 @@ export const getProxyInfo = (ctx: Context): ProxyInfo | undefined => {
 export const getClientIp = (ctx: Context): string => {
 	const proxyInfo = proxyInfoMap.get(ctx)
 	if (proxyInfo) return proxyInfo.ip
-	return ctx.socket.remoteAddress || 'unknown'
+	return ctx.socket?.remoteAddress || 'unknown'
 }
 
 export type ProxyOptions = {
@@ -134,7 +134,7 @@ export const proxy = (options: ProxyOptions = {}): Wrapper<Context> => {
 
 	return (handler: Handler<Context>): Handler<Context> => {
 		return async (ctx: Context): Promise<ServerResponse> => {
-			const socketIp = ctx.socket.remoteAddress || 'unknown'
+			const socketIp = ctx.socket?.remoteAddress || 'unknown'
 
 			// Check if we should trust proxy headers
 			if (!trust || !isTrusted(socketIp, trust)) {
