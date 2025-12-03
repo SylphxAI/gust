@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.10 (2025-12-03)
+
+### ✨ Features
+
+- **gust:** add native binding keywords ([ec65217](https://github.com/SylphxAI/gust/commit/ec652170fea957bf5662c4f652b0801915aa5e2c))
+
 ## 0.1.9 (2025-12-03)
 
 ### ✨ Features
