@@ -33,6 +33,8 @@
 		"web",
 		"fast",
 		"wasm",
+		"napi",
+		"native",
 		"rust",
 		"bun"
 	],
