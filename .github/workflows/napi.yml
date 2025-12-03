@@ -150,16 +150,30 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: crates/gust-napi
+          path: crates/gust-napi/artifacts
 
       - name: Move artifact to crate root for testing
         shell: bash
         run: |
-          # Find any .node file in npm subdirectories and copy to crate root
-          NODE_FILE=$(find crates/gust-napi -name "*.node" | head -1)
+          # Map target to expected file suffix
+          TARGET="${{ matrix.settings.target }}"
+          case "$TARGET" in
+            aarch64-apple-darwin) SUFFIX="darwin-arm64" ;;
+            x86_64-apple-darwin) SUFFIX="darwin-x64" ;;
+            x86_64-unknown-linux-gnu) SUFFIX="linux-x64-gnu" ;;
+            aarch64-unknown-linux-gnu) SUFFIX="linux-arm64-gnu" ;;
+            *) echo "Unknown target: $TARGET"; exit 1 ;;
+          esac
+
+          # Find and copy the correct .node file
+          NODE_FILE=$(find crates/gust-napi/artifacts -name "gust-napi.${SUFFIX}.node" | head -1)
           if [ -n "$NODE_FILE" ]; then
             cp "$NODE_FILE" crates/gust-napi/
             echo "Copied $NODE_FILE to crates/gust-napi/"
+          else
+            echo "Expected file not found: gust-napi.${SUFFIX}.node"
+            find crates/gust-napi/artifacts -name "*.node"
+            exit 1
           fi
           ls -la crates/gust-napi/
 
