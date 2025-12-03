@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8 (2025-12-03)
+
+### 🐛 Bug Fixes
+
+- **app:** convert Express-style path params to matchit syntax for Rust router ([0a753ee](https://github.com/SylphxAI/gust/commit/0a753ee3ae6a249750210631edddb41445380cbf))
+
 ## 0.1.7 (2025-12-03)
 
 ### ✨ Features

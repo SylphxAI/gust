@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12 (2025-12-03)
+
+### ✨ Features
+
+- **gust:** add framework keyword ([9026302](https://github.com/SylphxAI/gust/commit/902630243c3759f3e55f216c61ff7773b6836680))
+
 ## 0.1.11 (2025-12-03)
 
 ### ✨ Features

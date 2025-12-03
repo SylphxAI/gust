@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.8 (2025-12-03)
+
+### 📦 Dependencies
+
+- Updated `@sylphx/gust-app` to 0.1.8
+
 ## 0.1.7 (2025-12-03)
 
 ### ✨ Features

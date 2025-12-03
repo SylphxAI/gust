@@ -1,6 +1,6 @@
 {
 	"name": "@sylphx/gust-app",
-	"version": "0.1.7",
+	"version": "0.1.8",
 	"description": "Stateless HTTP application framework - portable across Bun, Deno, Edge, Serverless",
 	"type": "module",
 	"main": "dist/index.js",
