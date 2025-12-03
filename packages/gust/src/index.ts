@@ -1,10 +1,10 @@
 /**
  * @sylphx/gust
- * High-performance HTTP server framework
+ * High-performance HTTP server framework with native Rust bindings
  *
  * This is the main package that re-exports from:
  * - @sylphx/gust-app: Stateless HTTP application framework (portable)
- * - @sylphx/gust-server: High-performance Rust-powered HTTP server
+ * - @sylphx/gust-server: High-performance Rust-powered HTTP server (NAPI)
  *
  * @example
  * ```typescript
