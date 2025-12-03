@@ -20,9 +20,9 @@ compress = ["dep:flate2", "dep:brotli"]
 
 [dependencies]
 # Core (always included)
+gust-router.workspace = true
 bytes.workspace = true
 smallvec.workspace = true
-matchit.workspace = true
 thiserror.workspace = true
 http.workspace = true
 bumpalo.workspace = true

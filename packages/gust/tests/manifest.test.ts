@@ -1,8 +1,9 @@
 /**
- * Manifest Tests - Route Manifest Generation & Path Conversion
+ * Manifest Tests - Route Manifest Generation
  *
- * Tests the critical path conversion from Express-style (:id, *path)
- * to matchit syntax ({id}, {*path}) for Rust native router integration.
+ * Tests route manifest generation for Rust native router integration.
+ * The Rust router now uses Express-style syntax (:id, *path) directly,
+ * so no path conversion is needed.
  */
 
 import { describe, expect, it } from 'bun:test'
@@ -65,7 +66,7 @@ describe('Route Manifest', () => {
 		})
 	})
 
-	describe('path conversion (toMatchitPath)', () => {
+	describe('path passthrough (Express-style)', () => {
 		it('should keep static paths unchanged', () => {
 			const app = createApp({
 				routes: [get('/users', () => json({}))],
@@ -82,86 +83,84 @@ describe('Route Manifest', () => {
 			expect(app.manifest.routes[0].path).toBe('/')
 		})
 
-		it('should convert single parameter :id to {id}', () => {
+		it('should keep Express-style :id parameters unchanged', () => {
 			const app = createApp({
 				routes: [get('/users/:id', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/users/{id}')
+			expect(app.manifest.routes[0].path).toBe('/users/:id')
 		})
 
-		it('should convert multiple parameters', () => {
+		it('should keep multiple parameters unchanged', () => {
 			const app = createApp({
 				routes: [get('/posts/:postId/comments/:commentId', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/posts/{postId}/comments/{commentId}')
+			expect(app.manifest.routes[0].path).toBe('/posts/:postId/comments/:commentId')
 		})
 
-		it('should convert complex nested parameters', () => {
+		it('should keep complex nested parameters unchanged', () => {
 			const app = createApp({
 				routes: [get('/api/v1/orgs/:orgId/teams/:teamId/members/:memberId', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/api/v1/orgs/{orgId}/teams/{teamId}/members/{memberId}')
+			expect(app.manifest.routes[0].path).toBe('/api/v1/orgs/:orgId/teams/:teamId/members/:memberId')
 		})
 
-		it('should convert wildcard *path to {*path}', () => {
+		it('should keep wildcard *path unchanged', () => {
 			const app = createApp({
 				routes: [get('/files/*path', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/files/{*path}')
+			expect(app.manifest.routes[0].path).toBe('/files/*path')
 		})
 
-		it('should convert bare wildcard * to {*}', () => {
+		it('should keep bare wildcard * unchanged', () => {
 			const app = createApp({
 				routes: [get('/static/*', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/static/{*}')
+			expect(app.manifest.routes[0].path).toBe('/static/*')
 		})
 
-		it('should handle parameter followed by extension', () => {
-			// Note: The regex treats :name.json as a single parameter name
-			// This is Express-style behavior where params end at / not .
+		it('should keep parameter followed by extension unchanged', () => {
 			const app = createApp({
 				routes: [get('/files/:name.json', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/files/{name.json}')
+			expect(app.manifest.routes[0].path).toBe('/files/:name.json')
 		})
 
-		it('should handle parameters with hyphens in name', () => {
+		it('should keep parameters with hyphens unchanged', () => {
 			const app = createApp({
 				routes: [get('/users/:user-id', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/users/{user-id}')
+			expect(app.manifest.routes[0].path).toBe('/users/:user-id')
 		})
 
-		it('should handle parameters with underscores in name', () => {
+		it('should keep parameters with underscores unchanged', () => {
 			const app = createApp({
 				routes: [get('/users/:user_id', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/users/{user_id}')
+			expect(app.manifest.routes[0].path).toBe('/users/:user_id')
 		})
 
-		it('should handle mixed static and dynamic segments', () => {
+		it('should keep mixed static and dynamic segments unchanged', () => {
 			const app = createApp({
 				routes: [get('/api/users/:id/profile', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/api/users/{id}/profile')
+			expect(app.manifest.routes[0].path).toBe('/api/users/:id/profile')
 		})
 
-		it('should handle paths with trailing slash', () => {
+		it('should keep paths with trailing slash unchanged', () => {
 			const app = createApp({
 				routes: [get('/users/:id/', () => json({}))],
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/users/{id}/')
+			expect(app.manifest.routes[0].path).toBe('/users/:id/')
 		})
 	})
 
@@ -254,14 +253,14 @@ describe('Route Manifest', () => {
 			expect(handlerIds.has(0)).toBe(true)
 		})
 
-		it('should apply path conversion to expanded routes', () => {
+		it('should keep Express-style path in expanded routes', () => {
 			const app = createApp({
 				routes: [all('/users/:id', () => json({}))],
 			})
 
-			// All expanded routes should have converted path
+			// All expanded routes should keep Express-style path
 			for (const route of app.manifest.routes) {
-				expect(route.path).toBe('/users/{id}')
+				expect(route.path).toBe('/users/:id')
 			}
 		})
 
@@ -276,13 +275,13 @@ describe('Route Manifest', () => {
 	})
 
 	describe('routes() prefix helper manifest generation', () => {
-		it('should prefix and convert paths correctly', () => {
+		it('should prefix paths correctly', () => {
 			const app = createApp({
 				routes: routes('/api', [get('/users', () => json({})), get('/users/:id', () => json({}))]),
 			})
 
 			expect(app.manifest.routes[0].path).toBe('/api/users')
-			expect(app.manifest.routes[1].path).toBe('/api/users/{id}')
+			expect(app.manifest.routes[1].path).toBe('/api/users/:id')
 		})
 
 		it('should handle nested routes() with params', () => {
@@ -292,8 +291,8 @@ describe('Route Manifest', () => {
 				]),
 			})
 
-			expect(app.manifest.routes[0].path).toBe('/api/orgs/{orgId}/members')
-			expect(app.manifest.routes[1].path).toBe('/api/orgs/{orgId}/members/{memberId}')
+			expect(app.manifest.routes[0].path).toBe('/api/orgs/:orgId/members')
+			expect(app.manifest.routes[1].path).toBe('/api/orgs/:orgId/members/:memberId')
 		})
 	})
 

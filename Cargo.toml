@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/gust-router",
     "crates/gust-core",
     "crates/gust-wasm",
     "crates/gust-napi",
@@ -16,7 +17,6 @@ repository = "https://github.com/sylphx/gust"
 # Core dependencies (shared)
 bytes = "1"
 smallvec = "1.13"
-matchit = "0.8"
 thiserror = "1"
 
 # Async runtime
@@ -54,6 +54,7 @@ napi = { version = "2", features = ["async", "tokio_rt"] }
 napi-derive = "2"
 
 # Internal
+gust-router = { path = "crates/gust-router" }
 gust-core = { path = "crates/gust-core" }
 
 [profile.release]

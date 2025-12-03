@@ -13,6 +13,7 @@ default = ["wasm"]
 wasm = ["wasm-bindgen", "js-sys"]
 
 [dependencies]
+gust-router = { path = "../gust-router" }
 wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
 memchr = "2.7"

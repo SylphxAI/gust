@@ -1027,13 +1027,16 @@ impl Clone for InvokeHandler {
 
 /// Server state shared across all connections
 struct ServerState {
-    /// Static routes (pre-rendered responses)
-    static_routes: RwLock<Router<StaticResponse>>,
-    /// Dynamic routes (JS handlers) - legacy pattern
-    dynamic_routes: RwLock<Router<DynamicHandler>>,
-    /// App routes (handler ID based) - new pattern from GustApp.manifest
-    /// Using ArcSwap for lock-free reads on hot path
-    app_routes: ArcSwap<Router<u32>>,
+    /// Router using handler IDs (SSOT from gust-router) - for legacy routes
+    router: RwLock<Router>,
+    /// Static responses indexed by handler ID
+    static_responses: RwLock<HashMap<u32, StaticResponse>>,
+    /// Dynamic handlers indexed by handler ID - legacy pattern
+    dynamic_handlers: RwLock<HashMap<u32, DynamicHandler>>,
+    /// Next handler ID for legacy routes (atomic counter)
+    next_handler_id: AtomicU32,
+    /// App routes - using ArcSwap for lock-free reads on hot path
+    app_routes: ArcSwap<Router>,
     /// Invoke handler callback - calls GustApp.invokeHandler(id, ctx)
     /// Using ArcSwap for lock-free reads on hot path (massive perf improvement)
     invoke_handler: ArcSwap<Option<InvokeHandler>>,
@@ -1066,8 +1069,10 @@ const DEFAULT_MAX_HEADER_SIZE: u32 = 8192;      // 8KB
 impl ServerState {
     fn new() -> Self {
         Self {
-            static_routes: RwLock::new(Router::new()),
-            dynamic_routes: RwLock::new(Router::new()),
+            router: RwLock::new(Router::new()),
+            static_responses: RwLock::new(HashMap::new()),
+            dynamic_handlers: RwLock::new(HashMap::new()),
+            next_handler_id: AtomicU32::new(1000), // Start at 1000 to avoid conflicts with app routes
             app_routes: ArcSwap::new(Arc::new(Router::new())),
             invoke_handler: ArcSwap::new(Arc::new(None)),
             middleware: RwLock::new(MiddlewareChain::new()),
@@ -1323,8 +1328,8 @@ impl GustServer {
         content_type: String,
         body: String,
     ) -> Result<()> {
-        let method_enum = Method::from_str(&method)
-            .map_err(|e| Error::from_reason(e.to_string()))?;
+        // Generate unique handler ID
+        let handler_id = self.state.next_handler_id.fetch_add(1, Ordering::SeqCst);
 
         // Pre-render the HTTP/1.1 response
         let res = ResponseBuilder::new(StatusCode(status as u16))
@@ -1337,12 +1342,21 @@ impl GustServer {
             bytes: response_bytes,
         };
 
+        // Store response in HashMap
         self.state
-            .static_routes
+            .static_responses
             .write()
             .await
-            .route(method_enum, &path, static_response)
-            .map_err(|e| Error::from_reason(e.to_string()))
+            .insert(handler_id, static_response);
+
+        // Insert route into router
+        self.state
+            .router
+            .write()
+            .await
+            .insert(&method, &path, handler_id);
+
+        Ok(())
     }
 
     /// Add a dynamic route with JS handler callback
@@ -1355,8 +1369,8 @@ impl GustServer {
         path: String,
         handler: JsFunction,
     ) -> Result<()> {
-        let method_enum = Method::from_str(&method)
-            .map_err(|e| Error::from_reason(e.to_string()))?;
+        // Generate unique handler ID
+        let handler_id = self.state.next_handler_id.fetch_add(1, Ordering::SeqCst);
 
         // Create threadsafe function that can be called from any thread
         let tsfn: ThreadsafeFunction<RequestContext, ErrorStrategy::Fatal> = handler
@@ -1364,12 +1378,15 @@ impl GustServer {
                 Ok(vec![ctx.value])
             })?;
 
-        let handler = DynamicHandler { callback: tsfn };
+        let dynamic_handler = DynamicHandler { callback: tsfn };
 
-        // Use blocking write since we're not in async context
-        let mut routes = self.state.dynamic_routes.blocking_write();
-        routes.route(method_enum, &path, handler)
-            .map_err(|e| Error::from_reason(e.to_string()))
+        // Store handler in HashMap
+        self.state.dynamic_handlers.blocking_write().insert(handler_id, dynamic_handler);
+
+        // Insert route into router
+        self.state.router.blocking_write().insert(&method, &path, handler_id);
+
+        Ok(())
     }
 
     /// Set fallback handler for unmatched routes
@@ -1410,12 +1427,8 @@ impl GustServer {
         let mut new_router = Router::new();
 
         for entry in manifest.routes {
-            let method = Method::from_str(&entry.method)
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-
-            new_router
-                .route(method, &entry.path, entry.handler_id)
-                .map_err(|e| Error::from_reason(e.to_string()))?;
+            // Use insert() instead of route() - new gust-router API
+            new_router.insert(&entry.method, &entry.path, entry.handler_id);
         }
 
         // Atomic swap with ArcSwap - lock-free on read path
@@ -1765,15 +1778,44 @@ async fn handle_request(
     let method = Method::from_str(method_str).unwrap_or(Method::Get);
     let _is_get_or_head = method == Method::Get || method == Method::Head;
 
-    // FAST PATH: Check static routes first with minimal overhead
+    // FAST PATH: Check legacy static/dynamic routes first with minimal overhead
     {
-        let routes = state.static_routes.read().await;
-        if let Some(matched) = routes.match_route(method, path) {
-            let response_bytes = matched.value.bytes.clone();
-            return Ok(hyper::Response::builder()
-                .status(200)
-                .body(Full::new(response_bytes))
-                .unwrap());
+        let router = state.router.read().await;
+        if let Some(matched) = router.find(method_str, path) {
+            let handler_id = matched.handler_id;
+            drop(router);
+
+            // Try static response first
+            let static_responses = state.static_responses.read().await;
+            if let Some(static_response) = static_responses.get(&handler_id) {
+                let response_bytes = static_response.bytes.clone();
+                return Ok(hyper::Response::builder()
+                    .status(200)
+                    .body(Full::new(response_bytes))
+                    .unwrap());
+            }
+            drop(static_responses);
+
+            // Try dynamic handler
+            let dynamic_handlers = state.dynamic_handlers.read().await;
+            if let Some(handler) = dynamic_handlers.get(&handler_id) {
+                let handler = handler.clone();
+                let params: HashMap<String, String> = matched.params.into_iter().collect();
+                drop(dynamic_handlers);
+
+                // Create minimal context for dynamic handler
+                let ctx = RequestContext {
+                    method: method_str.to_string(),
+                    path: path.to_string(),
+                    query: req.uri().query().map(|s| s.to_string()),
+                    params,
+                    headers: HashMap::new(), // TODO: collect if needed
+                    body: String::new(),     // TODO: read if needed
+                };
+
+                let response = call_js_handler(&handler.callback, ctx).await;
+                return Ok(to_hyper_response(response_data_to_response(response)));
+            }
         }
     }
 
@@ -1782,9 +1824,9 @@ async fn handle_request(
     {
         // OPTIMIZATION: Lock-free read of app routes using ArcSwap
         let routes = state.app_routes.load();
-        if let Some(matched) = routes.match_route(method, path) {
-            let handler_id = matched.value;
-            let params = matched.params.clone();
+        if let Some(matched) = routes.find(method_str, path) {
+            let handler_id = matched.handler_id;
+            let params: HashMap<String, String> = matched.params.into_iter().collect();
             // No need to drop - ArcSwap guard is cheap
 
             // OPTIMIZATION: Lock-free read of invoke handler using ArcSwap
@@ -1902,13 +1944,9 @@ async fn handle_request(
 
     // FAST PATH: No middleware, check if we can use fallback directly
     if !has_middleware {
-        // Check dynamic routes first
-        let dynamic_result = {
-            let routes = state.dynamic_routes.read().await;
-            routes.match_route(method, path).map(|m| (m.value.clone(), m.params.clone()))
-        };
-
-        if dynamic_result.is_none() {
+        // Note: Legacy routes already checked above, so this section is for fallback only
+        // If no route matched, try fallback
+        if true {
             // No dynamic route match - try fallback with minimal context
             let fallback = state.fallback_handler.read().await.clone();
             if let Some(handler) = fallback {
@@ -1929,8 +1967,6 @@ async fn handle_request(
             // No fallback - 404
             return Ok(to_hyper_response(Response::not_found()));
         }
-
-        // Has dynamic route - need full context, fall through
     }
 
     // For dynamic routes with middleware, we need full context
@@ -1964,84 +2000,94 @@ async fn handle_request(
     };
     drop(middleware);
 
-    // 2. Try dynamic routes
-    let dynamic_result = {
-        let routes = state.dynamic_routes.read().await;
-        routes.match_route(method, &path).map(|m| (m.value.clone(), m.params.clone()))
+    // 2. Try legacy routes again with middleware (shouldn't happen often)
+    // This path is only for cases where middleware exists and modifies request
+    let legacy_result = {
+        let router = state.router.read().await;
+        router.find(&method_str, &path)
     };
 
-    if let Some((handler, params)) = dynamic_result {
-        // Check body size limit (lock-free atomic read)
-        let max_body_size = state.max_body_size.load(Ordering::Relaxed) as usize;
+    if let Some(matched) = legacy_result {
+        let handler_id = matched.handler_id;
+        let params: HashMap<String, String> = matched.params.into_iter().collect();
+
+        // Try dynamic handler
+        let dynamic_handlers = state.dynamic_handlers.read().await;
+        if let Some(handler) = dynamic_handlers.get(&handler_id).cloned() {
+            drop(dynamic_handlers);
+
+            // Check body size limit (lock-free atomic read)
+            let max_body_size = state.max_body_size.load(Ordering::Relaxed) as usize;
         if let Some(content_length) = headers_map.get("content-length") {
             if let Ok(len) = content_length.parse::<usize>() {
-                if len > max_body_size {
-                    return Ok(hyper::Response::builder()
-                        .status(413)
-                        .header("content-type", "text/plain")
-                        .body(Full::new(Bytes::from("Request Entity Too Large")))
-                        .unwrap());
+                    if len > max_body_size {
+                        return Ok(hyper::Response::builder()
+                            .status(413)
+                            .header("content-type", "text/plain")
+                            .body(Full::new(Bytes::from("Request Entity Too Large")))
+                            .unwrap());
+                    }
                 }
             }
-        }
 
-        // Read body for dynamic handlers with timeout (lock-free atomic read)
-        let request_timeout = state.request_timeout_ms.load(Ordering::Relaxed);
-        let body_result = if request_timeout > 0 {
-            tokio::time::timeout(
-                Duration::from_millis(request_timeout as u64),
-                req.collect()
-            ).await
-        } else {
-            Ok(req.collect().await)
-        };
+            // Read body for dynamic handlers with timeout (lock-free atomic read)
+            let request_timeout = state.request_timeout_ms.load(Ordering::Relaxed);
+            let body_result = if request_timeout > 0 {
+                tokio::time::timeout(
+                    Duration::from_millis(request_timeout as u64),
+                    req.collect()
+                ).await
+            } else {
+                Ok(req.collect().await)
+            };
 
-        let body_bytes = match body_result {
-            Ok(Ok(collected)) => {
-                let bytes = collected.to_bytes();
-                // Double-check size after reading (for chunked encoding)
-                if bytes.len() > max_body_size {
+            let body_bytes = match body_result {
+                Ok(Ok(collected)) => {
+                    let bytes = collected.to_bytes();
+                    // Double-check size after reading (for chunked encoding)
+                    if bytes.len() > max_body_size {
+                        return Ok(hyper::Response::builder()
+                            .status(413)
+                            .header("content-type", "text/plain")
+                            .body(Full::new(Bytes::from("Request Entity Too Large")))
+                            .unwrap());
+                    }
+                    bytes
+                },
+                Ok(Err(_)) => Bytes::new(),
+                Err(_) => {
+                    // Timeout
                     return Ok(hyper::Response::builder()
-                        .status(413)
+                        .status(408)
                         .header("content-type", "text/plain")
-                        .body(Full::new(Bytes::from("Request Entity Too Large")))
+                        .body(Full::new(Bytes::from("Request Timeout")))
                         .unwrap());
                 }
-                bytes
-            },
-            Ok(Err(_)) => Bytes::new(),
-            Err(_) => {
-                // Timeout
-                return Ok(hyper::Response::builder()
-                    .status(408)
-                    .header("content-type", "text/plain")
-                    .body(Full::new(Bytes::from("Request Timeout")))
-                    .unwrap());
+            };
+            let body_str = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
+
+            // Create RequestContext for JS handler (matches TypeScript interface)
+            let ctx = RequestContext {
+                method: method_str.clone(),
+                path: path.clone(),
+                query,
+                params,
+                headers: headers_map.clone(),
+                body: body_str,
+            };
+
+            // Call JS handler
+            let response = call_js_handler(&handler.callback, ctx).await;
+            let mut our_response = response_data_to_response(response);
+
+            // Apply middleware chain (after) - only if middleware exists
+            if let Some(ref req) = request {
+                let middleware = state.middleware.read().await;
+                middleware.run_after(req, &mut our_response);
             }
-        };
-        let body_str = String::from_utf8(body_bytes.to_vec()).unwrap_or_default();
 
-        // Create RequestContext for JS handler (matches TypeScript interface)
-        let ctx = RequestContext {
-            method: method_str.clone(),
-            path: path.clone(),
-            query,
-            params,
-            headers: headers_map,
-            body: body_str,
-        };
-
-        // Call JS handler
-        let response = call_js_handler(&handler.callback, ctx).await;
-        let mut our_response = response_data_to_response(response);
-
-        // Apply middleware chain (after) - only if middleware exists
-        if let Some(ref req) = request {
-            let middleware = state.middleware.read().await;
-            middleware.run_after(req, &mut our_response);
+            return Ok(to_hyper_response(our_response));
         }
-
-        return Ok(to_hyper_response(our_response));
     }
 
     // 3. Try fallback handler

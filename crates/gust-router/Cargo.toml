@@ -1,0 +1,9 @@
+[package]
+name = "gust-router"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Zero-dependency Radix Trie HTTP router - SSOT for gust-core and gust-wasm"
+
+# Zero external dependencies - only std
+[dependencies]

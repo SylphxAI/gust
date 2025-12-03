@@ -31,7 +31,7 @@ pub mod tls;
 pub use error::{Error, Result};
 pub use request::{Method, Request, RequestBuilder};
 pub use response::{Response, ResponseBuilder, StatusCode};
-pub use router::{Router, RouteMatch};
+pub use router::{Router, Match};
 
 // Middleware re-exports
 pub use middleware::{Middleware, MiddlewareChain};

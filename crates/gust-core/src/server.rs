@@ -6,7 +6,7 @@
 //! - SO_REUSEPORT for load balancing
 //! - TCP_NODELAY for low latency
 
-use crate::{Method, Request, Response, Router, StatusCode};
+use crate::{Method, Request, Response, Router, Match, StatusCode};
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::body::Incoming;
@@ -42,6 +42,7 @@ pub struct StaticRoute {
     pub status: u16,
     pub content_type: String,
     pub body: String,
+    pub handler_id: u32,
 }
 
 impl StaticRoute {
@@ -64,51 +65,64 @@ pub type DynamicHandler = Arc<
 >;
 
 /// Server state shared across all connections
+///
+/// Uses handler IDs (u32) for routing, with separate storage for:
+/// - Static responses (pre-rendered bytes by handler ID)
+/// - Dynamic handlers (by handler ID)
 pub struct ServerState {
-    /// Static routes (pre-rendered responses)
-    pub static_routes: RwLock<Router<Bytes>>,
-    /// Dynamic routes
-    pub dynamic_routes: RwLock<Router<DynamicHandler>>,
+    /// Router using handler IDs
+    pub router: RwLock<Router>,
+    /// Static responses indexed by handler ID
+    pub static_responses: RwLock<HashMap<u32, Bytes>>,
+    /// Dynamic handlers indexed by handler ID
+    pub dynamic_handlers: RwLock<HashMap<u32, DynamicHandler>>,
 }
 
 impl ServerState {
     pub fn new() -> Self {
         Self {
-            static_routes: RwLock::new(Router::new()),
-            dynamic_routes: RwLock::new(Router::new()),
+            router: RwLock::new(Router::new()),
+            static_responses: RwLock::new(HashMap::new()),
+            dynamic_handlers: RwLock::new(HashMap::new()),
         }
     }
 
     /// Add a static route
     pub fn add_static(&self, route: StaticRoute) -> crate::Result<()> {
-        let method = Method::from_str(&route.method)?;
         let response_bytes = route.to_response_bytes();
-        self.static_routes
-            .write()
-            .route(method, &route.path, response_bytes)
+        self.router.write().insert(&route.method, &route.path, route.handler_id);
+        self.static_responses.write().insert(route.handler_id, response_bytes);
+        Ok(())
     }
 
     /// Add a dynamic route
-    pub fn add_dynamic(&self, method: &str, path: &str, handler: DynamicHandler) -> crate::Result<()> {
-        let method = Method::from_str(method)?;
-        self.dynamic_routes.write().route(method, path, handler)
+    pub fn add_dynamic(&self, method: &str, path: &str, handler_id: u32, handler: DynamicHandler) -> crate::Result<()> {
+        self.router.write().insert(method, path, handler_id);
+        self.dynamic_handlers.write().insert(handler_id, handler);
+        Ok(())
     }
 
     /// Match and handle a request
     pub async fn handle(&self, req: Request) -> Response {
-        // Try static routes first (fastest path)
-        if let Some(_matched) = self.static_routes.read().match_route(req.method, &req.path) {
-            // Static route - return pre-rendered response
-            // Note: For static routes, we bypass normal response building
-            // The caller will use the raw bytes directly
-            return Response::ok(); // Placeholder - actual bytes handled separately
-        }
+        let method_str = req.method.to_string();
 
-        // Try dynamic routes
-        if let Some(matched) = self.dynamic_routes.read().match_route(req.method, &req.path) {
-            let mut request = req;
-            request.params = matched.params;
-            return (matched.value)(request).await;
+        // Find matching route
+        if let Some(matched) = self.router.read().find(&method_str, &req.path) {
+            let handler_id = matched.handler_id;
+
+            // Try static response first (fastest path)
+            if let Some(bytes) = self.static_responses.read().get(&handler_id).cloned() {
+                // Static route - return pre-rendered response
+                // For now, return ok() as placeholder since bytes are handled elsewhere
+                return Response::ok();
+            }
+
+            // Try dynamic handler
+            if let Some(handler) = self.dynamic_handlers.read().get(&handler_id).cloned() {
+                let mut request = req;
+                request.params = matched.params.into_iter().collect();
+                return handler(request).await;
+            }
         }
 
         // 404 Not Found
@@ -117,10 +131,16 @@ impl ServerState {
 
     /// Get pre-rendered static response if available
     pub fn get_static_response(&self, method: Method, path: &str) -> Option<Bytes> {
-        self.static_routes
+        let method_str = method.to_string();
+        self.router
             .read()
-            .match_route(method, path)
-            .map(|m| m.value)
+            .find(&method_str, path)
+            .and_then(|m| self.static_responses.read().get(&m.handler_id).cloned())
+    }
+
+    /// Get matched route info (handler_id and params)
+    pub fn match_route(&self, method: &str, path: &str) -> Option<Match> {
+        self.router.read().find(method, path)
     }
 }
 
@@ -290,6 +310,7 @@ mod tests {
             status: 200,
             content_type: "application/json".to_string(),
             body: r#"{"hello":"world"}"#.to_string(),
+            handler_id: 0,
         };
 
         let bytes = route.to_response_bytes();
@@ -308,9 +329,30 @@ mod tests {
             status: 200,
             content_type: "application/json".to_string(),
             body: r#"{"status":"ok"}"#.to_string(),
+            handler_id: 0,
         }).unwrap();
 
         let response = state.get_static_response(Method::Get, "/health");
         assert!(response.is_some());
+    }
+
+    #[test]
+    fn test_match_route() {
+        let state = ServerState::new();
+
+        state.add_static(StaticRoute {
+            method: "GET".to_string(),
+            path: "/users/:id".to_string(),
+            status: 200,
+            content_type: "application/json".to_string(),
+            body: r#"{}"#.to_string(),
+            handler_id: 1,
+        }).unwrap();
+
+        let matched = state.match_route("GET", "/users/123");
+        assert!(matched.is_some());
+        let m = matched.unwrap();
+        assert_eq!(m.handler_id, 1);
+        assert_eq!(m.params, vec![("id".to_string(), "123".to_string())]);
     }
 }
