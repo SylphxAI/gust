@@ -1,6 +1,6 @@
 {
 	"name": "@sylphx/gust-server",
-	"version": "0.1.8",
+	"version": "0.1.9",
 	"description": "High-performance Rust-powered HTTP server - 220k+ req/s",
 	"type": "module",
 	"main": "dist/index.js",

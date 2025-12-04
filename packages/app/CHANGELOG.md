@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.9 (2025-12-04)
+
+### ✨ Features
+
+- **router:** add gust-router SSOT crate with zero dependencies ([6225d01](https://github.com/SylphxAI/gust/commit/6225d01d78e7ab72cd5fb212d6f91305a9530b65))
+
+### 🐛 Bug Fixes
+
+- **app:** add error handling to invokeHandler for graceful error responses ([6457de5](https://github.com/SylphxAI/gust/commit/6457de5365070be247babb89377a1bfa9f5ce4e0))
+
 ## 0.1.8 (2025-12-03)
 
 ### 🐛 Bug Fixes

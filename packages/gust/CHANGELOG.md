@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.13 (2025-12-04)
+
+### ✨ Features
+
+- **router:** add gust-router SSOT crate with zero dependencies ([6225d01](https://github.com/SylphxAI/gust/commit/6225d01d78e7ab72cd5fb212d6f91305a9530b65))
+
+### ✅ Tests
+
+- **serve:** add integration tests for server binding regression ([a2883f1](https://github.com/SylphxAI/gust/commit/a2883f1eba0d7a02ac5900d16c95e9b35b0e3a47))
+- **gust:** add comprehensive tests for manifest generation and invokeHandler ([3549bdc](https://github.com/SylphxAI/gust/commit/3549bdcc0a83303f28c04caccbd49917b54f0549))
+
 ## 0.1.12 (2025-12-03)
 
 ### ✨ Features
