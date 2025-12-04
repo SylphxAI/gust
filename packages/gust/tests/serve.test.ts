@@ -1,15 +1,94 @@
 /**
  * Serve Tests - Comprehensive edge case coverage
- * Note: These are unit tests for utility functions. Integration tests would require actual server.
+ * Includes both unit tests for utility functions and integration tests for server binding.
  */
 
-import { describe, expect, it } from 'bun:test'
-
-// Since serve.ts exports primarily the serve function which starts an actual server,
-// we'll test the internal helper functions by importing the module and testing
-// the response format and configuration handling.
+import { afterEach, describe, expect, it } from 'bun:test'
+import { serve } from '@sylphx/gust-server'
 
 describe('Serve', () => {
+	describe('Integration - Server Binding', () => {
+		let server: Awaited<ReturnType<typeof serve>> | null = null
+
+		afterEach(async () => {
+			if (server) {
+				await server.stop()
+				server = null
+			}
+		})
+
+		it('should bind port before serve() returns', async () => {
+			// This test verifies the fix for the regression where serve() returned
+			// before the port was actually bound (onListen fired too early)
+			const port = 19876 + Math.floor(Math.random() * 1000)
+
+			server = await serve({
+				port,
+				hostname: '127.0.0.1',
+				routes: [{ method: 'GET', path: '/', handler: () => new Response('OK') }],
+			})
+
+			// Immediately after serve() returns, the port MUST be bound
+			// This would fail before the fix because serve() returned before bind completed
+			const res = await fetch(`http://127.0.0.1:${port}/`)
+			expect(res.status).toBe(200)
+			expect(await res.text()).toBe('OK')
+		})
+
+		it('should call onListen after port is bound', async () => {
+			const port = 19876 + Math.floor(Math.random() * 1000)
+			let onListenCalled = false
+			let fetchSucceeded = false
+
+			server = await serve({
+				port,
+				hostname: '127.0.0.1',
+				routes: [{ method: 'GET', path: '/', handler: () => new Response('OK') }],
+				onListen: () => {
+					onListenCalled = true
+				},
+			})
+
+			// Both should be true after serve() returns
+			expect(onListenCalled).toBe(true)
+
+			// Port should be accessible
+			try {
+				const res = await fetch(`http://127.0.0.1:${port}/`)
+				fetchSucceeded = res.status === 200
+			} catch {
+				fetchSucceeded = false
+			}
+			expect(fetchSucceeded).toBe(true)
+		})
+
+		it('should handle multiple sequential server starts', async () => {
+			// Use different ports to avoid port reuse race conditions
+			const port1 = 19876 + Math.floor(Math.random() * 1000)
+			const port2 = port1 + 1
+
+			// Start first server
+			server = await serve({
+				port: port1,
+				hostname: '127.0.0.1',
+				routes: [{ method: 'GET', path: '/', handler: () => new Response('first') }],
+			})
+
+			let res = await fetch(`http://127.0.0.1:${port1}/`)
+			expect(await res.text()).toBe('first')
+			await server.stop()
+
+			// Start second server on different port
+			server = await serve({
+				port: port2,
+				hostname: '127.0.0.1',
+				routes: [{ method: 'GET', path: '/', handler: () => new Response('second') }],
+			})
+
+			res = await fetch(`http://127.0.0.1:${port2}/`)
+			expect(await res.text()).toBe('second')
+		})
+	})
 	describe('ServeOptions configuration', () => {
 		it('should have default port 3000 for HTTP', () => {
 			// Testing the default behavior documented in serve.ts
