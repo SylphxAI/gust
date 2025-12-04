@@ -391,10 +391,8 @@ const serveNative = async <App>(
 			})
 		}
 
-		// Start server with hostname (non-blocking)
-		server.serveWithHostname(port, hostname).catch((err) => {
-			options.onError?.(err as Error)
-		})
+		// Start server - awaits until bind completes, then spawns accept loop
+		await server.serveWithHostname(port, hostname)
 
 		options.onListen?.({ port, hostname, tls: useTls })
 

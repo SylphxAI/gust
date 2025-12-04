@@ -684,10 +684,8 @@ export const nativeServe = async (
 			server.addStaticRoute(route.method, route.path, route.status, route.contentType, route.body)
 		}
 
-		// Start server (non-blocking)
-		server.serve(port).catch((err) => {
-			onError?.(err as Error)
-		})
+		// Start server - awaits until bind completes, then spawns accept loop
+		await server.serve(port)
 
 		onListen?.({ port, hostname })
 
@@ -967,11 +965,8 @@ export const nativeServeWithConfig = async (
 			)
 		}
 
-		// Start server (non-blocking)
-		server.serve(port).catch((err) => {
-			onError?.(err as Error)
-		})
-
+		// Start server - await ensures port is actually bound before returning
+		await server.serve(port)
 		onListen?.({ port, hostname })
 
 		return {
