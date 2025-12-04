@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.9 (2025-12-04)
+
+### 🐛 Bug Fixes
+
+- **serve:** ensure port is bound before server.start() returns ([aa6216c](https://github.com/SylphxAI/gust/commit/aa6216c97444130c3d03907c592e317ca33938ec))
+
 ## 0.1.8 (2025-12-03)
 
 ### 📦 Dependencies
