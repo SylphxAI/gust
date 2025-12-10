@@ -1,0 +1,252 @@
+---
+title: Routing
+description: Define routes with path parameters, grouping, and type inference
+---
+
+Gust uses a high-performance Radix Trie router (WASM) with full TypeScript support.
+
+## Basic Routes
+
+```typescript
+import { get, post, put, patch, del, all } from '@sylphx/gust'
+
+const routes = [
+  get('/', handler),           // GET
+  post('/users', handler),     // POST
+  put('/users/:id', handler),  // PUT
+  patch('/users/:id', handler), // PATCH
+  del('/users/:id', handler),  // DELETE (del not delete)
+  all('/proxy/*', handler),    // Any method
+]
+```
+
+## Path Parameters
+
+Parameters are extracted from `:param` segments:
+
+```typescript
+// Single parameter
+get('/users/:id', ({ ctx }) => {
+  console.log(ctx.params.id)  // '123' (typed!)
+  return json({ id: ctx.params.id })
+})
+
+// Multiple parameters
+get('/users/:userId/posts/:postId', ({ ctx }) => {
+  const { userId, postId } = ctx.params
+  return json({ userId, postId })
+})
+```
+
+## Wildcards
+
+Catch-all routes with `*`:
+
+```typescript
+// Match /files, /files/a, /files/a/b/c
+get('/files/*', ({ ctx }) => {
+  console.log(ctx.path)  // Full path
+  return json({ path: ctx.path })
+})
+```
+
+## Route Grouping
+
+Use `routes()` to prefix multiple routes:
+
+```typescript
+import { routes, get, post } from '@sylphx/gust'
+
+// /api/users, /api/users/:id
+const apiRoutes = routes('/api', [
+  get('/users', listUsers),
+  get('/users/:id', getUser),
+  post('/users', createUser),
+])
+
+// Nested groups
+// /api/v1/users, /api/v1/posts
+const v1Routes = routes('/api', [
+  ...routes('/v1', [
+    ...routes('/users', [
+      get('/', list),
+      get('/:id', show),
+    ]),
+    ...routes('/posts', [
+      get('/', list),
+    ]),
+  ]),
+])
+```
+
+## Handler Signature
+
+Handlers receive a context object:
+
+```typescript
+type Handler = ({ ctx, input }) => ServerResponse | Promise<ServerResponse>
+
+get('/users/:id', async ({ ctx }) => {
+  // Request info
+  ctx.method      // 'GET', 'POST', etc.
+  ctx.path        // '/users/123'
+  ctx.query       // '?foo=bar'
+  ctx.headers     // Record<string, string>
+  ctx.params      // { id: '123' }
+
+  // Body parsing
+  ctx.body        // Raw body (Uint8Array)
+  await ctx.json() // Parse as JSON
+  await ctx.text() // Parse as text
+
+  // App context (user-defined)
+  ctx.app         // Your custom context
+
+  // Original request (for external handlers)
+  ctx.request     // Request object
+
+  return json({ id: ctx.params.id })
+})
+```
+
+## Response Helpers
+
+```typescript
+import {
+  json,
+  text,
+  html,
+  redirect,
+  response,
+  notFound,
+  badRequest,
+  unauthorized,
+  forbidden,
+  serverError,
+} from '@sylphx/gust'
+
+// JSON (most common)
+json({ data: 'value' })
+json({ error: 'Bad request' }, { status: 400 })
+json(data, { headers: { 'X-Custom': 'header' } })
+
+// Other formats
+text('Hello World')
+html('<h1>Hello</h1>')
+redirect('/new-path')
+redirect('/permanent', 301)
+
+// Custom response
+response(body, {
+  status: 201,
+  headers: { 'Content-Type': 'application/xml' }
+})
+
+// Error shortcuts
+notFound()       // 404
+badRequest()     // 400
+unauthorized()   // 401
+forbidden()      // 403
+serverError()    // 500
+```
+
+## External Handler Integration
+
+Integrate fetch-based handlers (GraphQL Yoga, tRPC, Hono):
+
+```typescript
+import { createApp, all } from '@sylphx/gust'
+import { createYoga } from 'graphql-yoga'
+
+const yoga = createYoga({ schema })
+
+const app = createApp({
+  routes: [
+    // Direct integration - auto-detects handler type!
+    all('/graphql', yoga.fetch),
+  ],
+})
+```
+
+Works with:
+- GraphQL Yoga
+- tRPC
+- Hono
+- Any `(Request) => Response` handler
+
+## Typed App Context
+
+Define custom context for dependency injection:
+
+```typescript
+import { createApp, createRouter } from '@sylphx/gust'
+
+// Define your app context
+type App = {
+  db: Database
+  user: User | null
+  requestId: string
+}
+
+// Create typed route builders
+const { get, post, routes } = createRouter<App>()
+
+const app = createApp({
+  routes: [
+    get('/users', ({ ctx }) => {
+      // ctx.app.db is typed!
+      return json(ctx.app.db.getUsers())
+    }),
+  ],
+
+  // Provide app context per request
+  context: (baseCtx) => ({
+    db: getDatabase(),
+    user: getUserFromToken(baseCtx.headers.authorization),
+    requestId: crypto.randomUUID(),
+  }),
+})
+```
+
+## Error Handling
+
+### Global Error Handler
+
+```typescript
+const app = createApp({
+  routes: [...],
+  onError: (error) => {
+    console.error(error)
+    return json(
+      { error: 'Internal Server Error' },
+      { status: 500 }
+    )
+  },
+})
+```
+
+### 404 Handler
+
+```typescript
+const app = createApp({
+  routes: [...],
+  notFound: () => json(
+    { error: 'Not Found' },
+    { status: 404 }
+  ),
+})
+```
+
+### Route-Level Errors
+
+```typescript
+get('/users/:id', async ({ ctx }) => {
+  const user = await db.getUser(ctx.params.id)
+
+  if (!user) {
+    return notFound()
+  }
+
+  return json(user)
+})
+```

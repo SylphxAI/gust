@@ -1,0 +1,311 @@
+---
+title: Authentication
+description: JWT, session, API keys, and other auth patterns
+---
+
+Gust provides multiple authentication strategies out of the box.
+
+## JWT Authentication
+
+Most common for APIs and SPAs:
+
+```typescript
+import {
+  jwtAuth,
+  optionalJwt,
+  createJwt,
+  verifyJwt,
+  getJwtPayload,
+} from '@sylphx/gust'
+
+// Protect routes with JWT
+const protectedRoute = compose(
+  jwtAuth({ secret: process.env.JWT_SECRET! }),
+  ({ ctx }) => {
+    const payload = getJwtPayload(ctx)
+    return json({ user: payload })
+  }
+)
+
+// Optional JWT (doesn't fail if missing)
+const optionalAuth = compose(
+  optionalJwt({ secret: process.env.JWT_SECRET! }),
+  ({ ctx }) => {
+    const payload = getJwtPayload(ctx)
+    return json({ user: payload ?? null })
+  }
+)
+```
+
+### Creating Tokens
+
+```typescript
+const token = await createJwt(
+  {
+    userId: '123',
+    role: 'admin',
+    email: 'user@example.com',
+  },
+  process.env.JWT_SECRET!,
+  {
+    expiresIn: '1h',        // Token expiry
+    issuer: 'my-app',       // Optional
+    audience: 'api',        // Optional
+  }
+)
+```
+
+### Verifying Tokens
+
+```typescript
+try {
+  const payload = await verifyJwt(token, process.env.JWT_SECRET!)
+  console.log(payload.userId)
+} catch (error) {
+  // Token invalid or expired
+}
+```
+
+### Login Endpoint Example
+
+```typescript
+post('/login', compose(
+  validate({
+    body: object({
+      email: email(),
+      password: string({ minLength: 8 }),
+    }),
+  }),
+  async ({ ctx }) => {
+    const { email, password } = getValidated(ctx)
+
+    const user = await db.getUserByEmail(email)
+    if (!user || !await verifyPassword(password, user.passwordHash)) {
+      return unauthorized()
+    }
+
+    const token = await createJwt(
+      { userId: user.id, role: user.role },
+      process.env.JWT_SECRET!,
+      { expiresIn: '24h' }
+    )
+
+    return json({ token })
+  }
+))
+```
+
+## Session Authentication
+
+For traditional web apps with cookies:
+
+```typescript
+import {
+  session,
+  getSession,
+  flash,
+} from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    post('/login', async ({ ctx }) => {
+      const { email, password } = await ctx.json()
+
+      const user = await authenticate(email, password)
+      if (!user) {
+        flash(ctx, 'error', 'Invalid credentials')
+        return redirect('/login')
+      }
+
+      const sess = getSession(ctx)
+      sess.data.userId = user.id
+      sess.data.role = user.role
+
+      return redirect('/dashboard')
+    }),
+
+    get('/dashboard', ({ ctx }) => {
+      const sess = getSession(ctx)
+      if (!sess.data.userId) {
+        return redirect('/login')
+      }
+      return json({ userId: sess.data.userId })
+    }),
+
+    post('/logout', ({ ctx }) => {
+      const sess = getSession(ctx)
+      sess.destroy()
+      return redirect('/login')
+    }),
+  ],
+
+  middleware: session({
+    secret: process.env.SESSION_SECRET!,
+    maxAge: 86400 * 7,  // 7 days
+    secure: true,
+    httpOnly: true,
+  }),
+})
+```
+
+### CSRF Protection
+
+Always use CSRF protection with sessions:
+
+```typescript
+import { session, csrf, getCsrfToken } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/form', ({ ctx }) => html(`
+      <form method="POST" action="/submit">
+        <input type="hidden" name="_csrf" value="${getCsrfToken(ctx)}">
+        <input name="data" />
+        <button>Submit</button>
+      </form>
+    `)),
+
+    post('/submit', ({ ctx }) => {
+      // CSRF middleware validates automatically
+      return json({ success: true })
+    }),
+  ],
+
+  middleware: compose(
+    session({ secret: 'session-secret' }),
+    csrf({ secret: 'csrf-secret' }),
+  ),
+})
+```
+
+## API Key Authentication
+
+For service-to-service or public APIs:
+
+```typescript
+import { apiKeyAuth } from '@sylphx/gust'
+
+// From header (X-API-Key)
+apiKeyAuth({
+  header: 'X-API-Key',
+  validate: async (key) => {
+    const apiKey = await db.getApiKey(key)
+    return apiKey && !apiKey.revoked
+  },
+})
+
+// From query parameter (?api_key=xxx)
+apiKeyAuth({
+  query: 'api_key',
+  validate: async (key) => {
+    return await db.validateApiKey(key)
+  },
+})
+```
+
+## Bearer Token Authentication
+
+Generic token-based auth:
+
+```typescript
+import { bearerAuth } from '@sylphx/gust'
+
+bearerAuth({
+  validate: async (token) => {
+    // Validate against your token store
+    const session = await db.getSession(token)
+    return session && !session.expired
+  },
+})
+```
+
+## Basic Authentication
+
+For simple admin interfaces or internal tools:
+
+```typescript
+import { basicAuth } from '@sylphx/gust'
+
+basicAuth({
+  validate: async (username, password) => {
+    const user = await db.getUser(username)
+    return user && await verifyPassword(password, user.hash)
+  },
+  realm: 'Admin Area',
+})
+```
+
+## HMAC Authentication
+
+For webhook verification or signed requests:
+
+```typescript
+import { hmacAuth } from '@sylphx/gust'
+
+hmacAuth({
+  secret: process.env.WEBHOOK_SECRET!,
+  header: 'X-Signature',
+  algorithm: 'sha256',
+})
+```
+
+## Role-Based Access Control
+
+Combine auth with custom middleware:
+
+```typescript
+const requireRole = (...roles: string[]) => (handler) => async (args) => {
+  const payload = getJwtPayload(args.ctx)
+  if (!roles.includes(payload?.role)) {
+    return forbidden()
+  }
+  return handler(args)
+}
+
+const app = createApp({
+  routes: [
+    // Public
+    get('/', () => json({ public: true })),
+
+    // Any authenticated user
+    get('/profile', compose(
+      jwtAuth({ secret }),
+      ({ ctx }) => json(getJwtPayload(ctx))
+    )),
+
+    // Admin only
+    get('/admin', compose(
+      jwtAuth({ secret }),
+      requireRole('admin'),
+      () => json({ admin: true })
+    )),
+
+    // Multiple roles
+    get('/dashboard', compose(
+      jwtAuth({ secret }),
+      requireRole('admin', 'manager'),
+      () => json({ dashboard: true })
+    )),
+  ],
+})
+```
+
+## Best Practices
+
+1. **Store secrets securely** - Use environment variables
+2. **Use HTTPS** - Always in production
+3. **Set token expiry** - Short-lived tokens (1h) with refresh tokens
+4. **Validate on every request** - Don't cache auth state
+5. **Log auth events** - Track login attempts, failures
+6. **Rate limit auth endpoints** - Prevent brute force
+
+```typescript
+const app = createApp({
+  routes: [
+    post('/login', compose(
+      rateLimit({ max: 5, window: 60000 }),  // 5 attempts/minute
+      loginHandler
+    )),
+  ],
+})
+```

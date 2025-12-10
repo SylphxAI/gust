@@ -1,0 +1,89 @@
+{
+  "$schema": "https://context7.com/schema/v1.json",
+  "name": "@sylphx/gust",
+  "description": "High-performance HTTP server framework for Bun and Node.js with native Rust acceleration",
+  "repository": "https://github.com/SylphxAI/gust",
+  "documentation": "https://gust.sylphx.com",
+  "rules": [
+    {
+      "title": "Use createApp for applications",
+      "description": "Always use createApp() to define routes and middleware. It creates a stateless app that can be used with any server.",
+      "example": "const app = createApp({ routes: [...], middleware: cors() })"
+    },
+    {
+      "title": "Use serve for native performance",
+      "description": "Use serve() from @sylphx/gust for native Rust acceleration (220k+ req/s). For serverless, use app.fetch directly.",
+      "example": "await serve({ app, port: 3000 })"
+    },
+    {
+      "title": "Use response helpers",
+      "description": "Use json(), text(), html(), redirect() instead of constructing responses manually.",
+      "example": "return json({ data }); return notFound();"
+    },
+    {
+      "title": "Use compose for middleware",
+      "description": "Use compose() to combine middleware (right-to-left). For route-specific middleware, wrap the handler.",
+      "example": "compose(cors(), rateLimit(), handler)"
+    },
+    {
+      "title": "Path parameters are typed",
+      "description": "Path parameters from :param are automatically typed in ctx.params.",
+      "example": "get('/users/:id', ({ ctx }) => json({ id: ctx.params.id }))"
+    },
+    {
+      "title": "Use validate for input validation",
+      "description": "Use validate() middleware with built-in schema validators (object, string, email, etc.).",
+      "example": "validate({ body: object({ email: email() }) })"
+    },
+    {
+      "title": "JWT auth is built-in",
+      "description": "Use jwtAuth() for protected routes. Use createJwt() and verifyJwt() for token management.",
+      "example": "compose(jwtAuth({ secret }), handler)"
+    },
+    {
+      "title": "SSE uses generators",
+      "description": "Use sse() with async generators for Server-Sent Events.",
+      "example": "sse(async function* () { yield { data: 'hello' } })"
+    },
+    {
+      "title": "Portable apps use @sylphx/gust-app",
+      "description": "For serverless/edge, import from @sylphx/gust-app and use app.fetch with any runtime.",
+      "example": "Bun.serve({ fetch: app.fetch }); export default { fetch: app.fetch }"
+    }
+  ],
+  "folders": [
+    {
+      "path": "website",
+      "type": "documentation",
+      "description": "Documentation website with guides and API reference"
+    },
+    {
+      "path": "packages/gust",
+      "type": "package",
+      "description": "Main package - re-exports app and server"
+    },
+    {
+      "path": "packages/app",
+      "type": "package",
+      "description": "Stateless app framework - routes, middleware, validation"
+    },
+    {
+      "path": "packages/server",
+      "type": "package",
+      "description": "Rust-powered HTTP server - WebSocket, SSE, streaming"
+    },
+    {
+      "path": "packages/core",
+      "type": "package",
+      "description": "WASM router and response helpers"
+    }
+  ],
+  "excludeFolders": [
+    "node_modules",
+    ".next",
+    "dist",
+    ".git",
+    "coverage",
+    ".source"
+  ]
+}

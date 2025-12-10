@@ -1,0 +1,278 @@
+---
+title: Server-Sent Events
+description: Real-time updates with SSE and backpressure handling
+---
+
+Server-Sent Events (SSE) provide one-way real-time updates from server to client.
+
+## Quick Example
+
+```typescript
+import { createApp, serve, get, sse } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/events', () =>
+      sse(async function* () {
+        for (let i = 0; i < 10; i++) {
+          yield { data: { count: i } }
+          await new Promise(r => setTimeout(r, 1000))
+        }
+      })
+    ),
+  ],
+})
+
+await serve({ app, port: 3000 })
+```
+
+## Generator Mode (Pull-Based)
+
+Best for streams with natural backpressure:
+
+```typescript
+get('/events', () =>
+  sse(async function* () {
+    // Each yield sends an event
+    yield { data: 'Hello' }
+    yield { data: { json: 'data' } }
+
+    // With event type
+    yield { event: 'update', data: { count: 1 } }
+
+    // With ID (for Last-Event-ID reconnection)
+    yield { id: '123', data: 'message' }
+
+    // With retry hint
+    yield { retry: 5000, data: 'reconnect in 5s' }
+  })
+)
+```
+
+## Handler Mode (Push-Based)
+
+Best for pub/sub patterns:
+
+```typescript
+get('/notifications', () =>
+  sse(async (emit) => {
+    // Send initial connection event
+    emit({ data: 'connected' })
+
+    // Subscribe to updates
+    const handler = (data: unknown) => {
+      emit({ event: 'notification', data })
+    }
+    pubsub.subscribe('updates', handler)
+
+    // Return cleanup function
+    return () => {
+      pubsub.unsubscribe('updates', handler)
+    }
+  })
+)
+```
+
+## Event Format
+
+Each event can include:
+
+```typescript
+yield {
+  // Event data (required)
+  // Strings sent as-is, objects JSON-stringified
+  data: { message: 'Hello' },
+
+  // Event type (optional)
+  // Client receives as event.type
+  event: 'message',
+
+  // Event ID (optional)
+  // For Last-Event-ID reconnection
+  id: '12345',
+
+  // Retry interval in ms (optional)
+  // Hint for client reconnection
+  retry: 3000,
+}
+```
+
+## Real-World Examples
+
+### Live Counter
+
+```typescript
+get('/counter', () =>
+  sse(async function* () {
+    let count = 0
+    while (true) {
+      yield { data: { count: count++ } }
+      await new Promise(r => setTimeout(r, 1000))
+    }
+  })
+)
+```
+
+### Database Changes
+
+```typescript
+get('/changes', () =>
+  sse(async (emit) => {
+    const subscription = db.subscribe('changes', (change) => {
+      emit({
+        event: change.type,  // 'insert', 'update', 'delete'
+        data: change.record,
+        id: change.id,
+      })
+    })
+
+    return () => subscription.unsubscribe()
+  })
+)
+```
+
+### Progress Updates
+
+```typescript
+post('/process', async ({ ctx }) => {
+  const jobId = await startJob(await ctx.json())
+  return json({ jobId })
+})
+
+get('/progress/:jobId', ({ ctx }) =>
+  sse(async function* () {
+    const jobId = ctx.params.jobId
+
+    while (true) {
+      const status = await getJobStatus(jobId)
+
+      yield {
+        event: 'progress',
+        data: { progress: status.progress, status: status.state },
+      }
+
+      if (status.state === 'completed' || status.state === 'failed') {
+        yield { event: 'done', data: status }
+        break
+      }
+
+      await new Promise(r => setTimeout(r, 500))
+    }
+  })
+)
+```
+
+### Chat Messages
+
+```typescript
+const chatChannels = new Map<string, Set<(msg: unknown) => void>>()
+
+get('/chat/:room', ({ ctx }) =>
+  sse(async (emit) => {
+    const room = ctx.params.room
+
+    if (!chatChannels.has(room)) {
+      chatChannels.set(room, new Set())
+    }
+
+    const listeners = chatChannels.get(room)!
+    const handler = (msg: unknown) => emit({ event: 'message', data: msg })
+    listeners.add(handler)
+
+    emit({ event: 'joined', data: { room } })
+
+    return () => listeners.delete(handler)
+  })
+)
+
+post('/chat/:room', async ({ ctx }) => {
+  const room = ctx.params.room
+  const message = await ctx.json()
+
+  const listeners = chatChannels.get(room)
+  if (listeners) {
+    for (const handler of listeners) {
+      handler(message)
+    }
+  }
+
+  return json({ sent: true })
+})
+```
+
+## Client Example
+
+```javascript
+const eventSource = new EventSource('/events')
+
+eventSource.onopen = () => {
+  console.log('Connected')
+}
+
+eventSource.onmessage = (event) => {
+  const data = JSON.parse(event.data)
+  console.log('Message:', data)
+}
+
+// Listen for specific event types
+eventSource.addEventListener('notification', (event) => {
+  const data = JSON.parse(event.data)
+  console.log('Notification:', data)
+})
+
+eventSource.onerror = (error) => {
+  console.error('Error:', error)
+}
+
+// Close connection
+eventSource.close()
+```
+
+## With Authentication
+
+```typescript
+get('/events', compose(
+  jwtAuth({ secret }),
+  ({ ctx }) => {
+    const user = getJwtPayload(ctx)
+
+    return sse(async function* () {
+      yield { data: { user: user.id, message: 'Connected' } }
+
+      // User-specific events...
+    })
+  }
+))
+```
+
+## Reconnection
+
+SSE automatically reconnects. Use `Last-Event-ID` for resumption:
+
+```typescript
+get('/events', ({ ctx }) =>
+  sse(async function* () {
+    // Check for reconnection
+    const lastId = ctx.headers['last-event-id']
+    let startFrom = lastId ? parseInt(lastId) + 1 : 0
+
+    for (let i = startFrom; i < 100; i++) {
+      yield { id: String(i), data: { index: i } }
+      await new Promise(r => setTimeout(r, 1000))
+    }
+  })
+)
+```
+
+## SSE vs WebSocket
+
+| Feature | SSE | WebSocket |
+|---------|-----|-----------|
+| Direction | Server → Client | Bidirectional |
+| Protocol | HTTP | WS |
+| Reconnection | Automatic | Manual |
+| Binary | No | Yes |
+| Browser support | Excellent | Excellent |
+| Use case | Updates, notifications | Chat, games |
+
+Use SSE when you only need server-to-client updates. Use WebSocket for bidirectional communication.

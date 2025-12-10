@@ -1,0 +1,78 @@
+---
+title: Installation
+description: Install Gust and get started in minutes
+---
+
+## Package Manager
+
+Install using your preferred package manager:
+
+```bash
+# bun
+bun add @sylphx/gust
+
+# npm
+npm install @sylphx/gust
+
+# pnpm
+pnpm add @sylphx/gust
+
+# yarn
+yarn add @sylphx/gust
+```
+
+## Choose Your Package
+
+Gust is modular. Choose what you need:
+
+### Full Server (Recommended)
+
+For maximum performance with native Rust acceleration:
+
+```bash
+bun add @sylphx/gust
+```
+
+This includes both the app framework and the high-performance server.
+
+### Portable App Only
+
+For serverless/edge deployments where you bring your own server:
+
+```bash
+bun add @sylphx/gust-app
+```
+
+Use with `Bun.serve()`, `Deno.serve()`, or any fetch-compatible runtime.
+
+### Server Features Only
+
+For advanced server features without the app framework:
+
+```bash
+bun add @sylphx/gust-server
+```
+
+## Requirements
+
+- **Bun** 1.1+ or **Node.js** 20+
+- TypeScript 5.0+ (recommended)
+
+## What's Included
+
+| Package | Contents |
+|---------|----------|
+| `@sylphx/gust` | Everything (re-exports both) |
+| `@sylphx/gust-app` | Routes, middleware, validation |
+| `@sylphx/gust-server` | Native server, WebSocket, SSE |
+| `@sylphx/gust-core` | WASM router, response helpers |
+
+## Native Binaries
+
+`@sylphx/gust-server` includes platform-specific native binaries:
+
+- Linux (x64, arm64)
+- macOS (x64, arm64)
+- Windows (x64)
+
+These are automatically selected at install time.

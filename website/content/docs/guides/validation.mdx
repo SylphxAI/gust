@@ -1,0 +1,290 @@
+---
+title: Validation
+description: Type-safe request validation with built-in schema validators
+---
+
+Gust includes a built-in validation system that's type-safe and tree-shakeable.
+
+## Quick Example
+
+```typescript
+import {
+  validate,
+  getValidated,
+  object,
+  string,
+  number,
+  email,
+} from '@sylphx/gust'
+
+const createUser = post('/users', compose(
+  validate({
+    body: object({
+      name: string({ minLength: 1, maxLength: 100 }),
+      email: email(),
+      age: number({ min: 0 }),
+    }),
+  }),
+  ({ ctx }) => {
+    const data = getValidated(ctx)
+    // data is typed: { name: string, email: string, age: number }
+    return json(data)
+  }
+))
+```
+
+## Schema Types
+
+### Primitives
+
+```typescript
+import {
+  string,
+  number,
+  boolean,
+  literal,
+} from '@sylphx/gust'
+
+// String
+string()
+string({ minLength: 1, maxLength: 255 })
+string({ pattern: /^[a-z]+$/ })
+
+// Number
+number()
+number({ min: 0, max: 100 })
+number({ integer: true })
+
+// Boolean
+boolean()
+
+// Literal (exact value)
+literal('active')
+literal(42)
+```
+
+### String Formats
+
+```typescript
+import {
+  email,
+  url,
+  uuid,
+  date,
+  datetime,
+  ip,
+  phone,
+} from '@sylphx/gust'
+
+email()                    // Valid email
+url()                      // Valid URL
+uuid()                     // UUID v4
+date()                     // ISO date (YYYY-MM-DD)
+datetime()                 // ISO datetime
+ip()                       // IPv4 or IPv6
+phone()                    // Phone number
+```
+
+### Objects
+
+```typescript
+import { object, string, number, optional } from '@sylphx/gust'
+
+object({
+  name: string(),
+  email: email(),
+  age: optional(number()),  // Optional field
+})
+
+// Strict mode (no extra fields)
+object({
+  name: string(),
+}, { strict: true })
+```
+
+### Arrays
+
+```typescript
+import { array, string, number } from '@sylphx/gust'
+
+array(string())                    // string[]
+array(number(), { minItems: 1 })   // At least 1 item
+array(string(), { maxItems: 10 })  // At most 10 items
+array(string(), { unique: true })  // Unique items
+```
+
+### Unions & Enums
+
+```typescript
+import { union, enum_, literal } from '@sylphx/gust'
+
+// Union of types
+union([string(), number()])
+
+// Enum (string literals)
+enum_(['pending', 'active', 'inactive'])
+
+// Discriminated union
+union([
+  object({ type: literal('email'), email: email() }),
+  object({ type: literal('phone'), phone: phone() }),
+])
+```
+
+### Modifiers
+
+```typescript
+import { optional, nullable, default_ } from '@sylphx/gust'
+
+optional(string())              // string | undefined
+nullable(string())              // string | null
+default_(string(), 'default')   // Uses default if missing
+```
+
+## Validation Targets
+
+### Body Validation
+
+```typescript
+validate({
+  body: object({
+    name: string(),
+  }),
+})
+```
+
+### Query Validation
+
+```typescript
+import { validateQuery, getValidatedQuery } from '@sylphx/gust'
+
+get('/users', compose(
+  validateQuery({
+    page: optional(number()),
+    limit: optional(number({ min: 1, max: 100 })),
+  }),
+  ({ ctx }) => {
+    const { page = 1, limit = 20 } = getValidatedQuery(ctx)
+    return json({ page, limit })
+  }
+))
+```
+
+### Params Validation
+
+```typescript
+validate({
+  params: object({
+    id: uuid(),
+  }),
+})
+```
+
+### Headers Validation
+
+```typescript
+validate({
+  headers: object({
+    'content-type': literal('application/json'),
+    'x-api-version': optional(string()),
+  }),
+})
+```
+
+### Combined Validation
+
+```typescript
+validate({
+  body: object({ name: string() }),
+  query: object({ include: optional(array(string())) }),
+  params: object({ id: uuid() }),
+})
+```
+
+## Custom Validators
+
+```typescript
+import { custom, refine } from '@sylphx/gust'
+
+// Fully custom validator
+const positiveNumber = custom<number>((value) => {
+  if (typeof value !== 'number' || value <= 0) {
+    return { valid: false, error: 'Must be a positive number' }
+  }
+  return { valid: true, value }
+})
+
+// Refine existing validator
+const username = refine(
+  string({ minLength: 3, maxLength: 20 }),
+  (value) => /^[a-z0-9_]+$/.test(value),
+  'Username must be alphanumeric'
+)
+```
+
+## Error Handling
+
+Validation errors return 400 Bad Request:
+
+```json
+{
+  "error": "Validation failed",
+  "details": [
+    { "path": "body.email", "message": "Invalid email format" },
+    { "path": "body.age", "message": "Must be greater than 0" }
+  ]
+}
+```
+
+Custom error handler:
+
+```typescript
+validate({
+  body: schema,
+  onError: (errors) => {
+    return json({
+      success: false,
+      errors: errors.map(e => e.message),
+    }, { status: 422 })
+  },
+})
+```
+
+## TypeScript Integration
+
+Validation schemas infer types automatically:
+
+```typescript
+const userSchema = object({
+  name: string(),
+  email: email(),
+  age: optional(number()),
+  role: enum_(['user', 'admin']),
+})
+
+// Inferred type:
+type User = {
+  name: string
+  email: string
+  age?: number
+  role: 'user' | 'admin'
+}
+
+post('/users', compose(
+  validate({ body: userSchema }),
+  ({ ctx }) => {
+    const user = getValidated(ctx)
+    // user is typed as User
+    return json(user)
+  }
+))
+```
+
+## Performance
+
+The validation system is designed for performance:
+
+- **Tree-shakeable** - Only include validators you use
+- **No runtime schema compilation** - Direct validation
+- **Early exit** - Stops on first error (configurable)
+- **Minimal overhead** - ~0.1ms for typical schemas

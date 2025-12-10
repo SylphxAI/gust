@@ -1,0 +1,252 @@
+---
+title: Deployment
+description: Deploy Gust to various platforms and runtimes
+---
+
+Gust apps can be deployed anywhere that runs JavaScript.
+
+## Bun Server (Recommended)
+
+For maximum performance with native Rust acceleration:
+
+```typescript
+import { createApp, serve, get, json } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [get('/', () => json({ hello: 'world' }))],
+})
+
+await serve({ app, port: process.env.PORT || 3000 })
+```
+
+Deploy to any VPS, container, or Bun-compatible platform.
+
+## Node.js Server
+
+Same code works with Node.js:
+
+```typescript
+import { createApp, serve, get, json } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [get('/', () => json({ hello: 'world' }))],
+})
+
+await serve({ app, port: process.env.PORT || 3000 })
+```
+
+## Cloudflare Workers
+
+Use `@sylphx/gust-app` for serverless:
+
+```typescript
+// src/index.ts
+import { createApp, get, json } from '@sylphx/gust-app'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ hello: 'cloudflare' })),
+  ],
+})
+
+export default {
+  fetch: app.fetch,
+}
+```
+
+```toml
+# wrangler.toml
+name = "my-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+```
+
+## Vercel Edge Functions
+
+```typescript
+// api/index.ts
+import { createApp, get, json } from '@sylphx/gust-app'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ hello: 'vercel' })),
+  ],
+})
+
+export const config = { runtime: 'edge' }
+export default app.fetch
+```
+
+## AWS Lambda
+
+```typescript
+import { createApp, get, json } from '@sylphx/gust-app'
+import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ hello: 'lambda' })),
+  ],
+})
+
+export const handler = async (
+  event: APIGatewayProxyEventV2
+): Promise<APIGatewayProxyResultV2> => {
+  const request = new Request(
+    `https://lambda.local${event.rawPath}${event.rawQueryString ? `?${event.rawQueryString}` : ''}`,
+    {
+      method: event.requestContext.http.method,
+      headers: event.headers as HeadersInit,
+      body: event.body,
+    }
+  )
+
+  const response = await app.fetch(request)
+
+  return {
+    statusCode: response.status,
+    headers: Object.fromEntries(response.headers),
+    body: await response.text(),
+  }
+}
+```
+
+## Deno Deploy
+
+```typescript
+import { createApp, get, json } from '@sylphx/gust-app'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ hello: 'deno' })),
+  ],
+})
+
+Deno.serve({ port: 8000 }, app.fetch)
+```
+
+## Docker
+
+```dockerfile
+FROM oven/bun:1
+
+WORKDIR /app
+
+COPY package.json bun.lockb ./
+RUN bun install --frozen-lockfile
+
+COPY . .
+
+ENV NODE_ENV=production
+ENV PORT=3000
+
+EXPOSE 3000
+
+CMD ["bun", "run", "src/index.ts"]
+```
+
+```yaml
+# docker-compose.yml
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - JWT_SECRET=${JWT_SECRET}
+```
+
+## Cluster Mode
+
+For multi-core servers:
+
+```typescript
+import { createApp, clusterServe, get, json } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ pid: process.pid })),
+  ],
+})
+
+await clusterServe({
+  app,
+  port: 3000,
+  workers: 'auto',  // Use all CPU cores
+})
+```
+
+## Health Checks
+
+Add health endpoints for orchestrators:
+
+```typescript
+import { liveness, readiness, memoryCheck } from '@sylphx/gust'
+
+const routes = [
+  get('/healthz', liveness()),
+  get('/ready', readiness([
+    memoryCheck(90),  // Fail if >90% memory used
+  ])),
+]
+```
+
+Kubernetes example:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 3000
+  initialDelaySeconds: 3
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 3000
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
+
+## Graceful Shutdown
+
+Handle SIGTERM for container orchestrators:
+
+```typescript
+const server = await serve({ app, port: 3000 })
+
+process.on('SIGTERM', async () => {
+  console.log('Shutting down gracefully...')
+  await server.close()
+  process.exit(0)
+})
+```
+
+## Environment Variables
+
+```typescript
+// .env
+PORT=3000
+NODE_ENV=production
+JWT_SECRET=your-secret-key
+DATABASE_URL=postgres://...
+
+// Usage
+const port = process.env.PORT || 3000
+const jwtSecret = process.env.JWT_SECRET!
+```
+
+## Production Checklist
+
+- [ ] **HTTPS** - Enable TLS or use a reverse proxy
+- [ ] **Environment variables** - No hardcoded secrets
+- [ ] **Health checks** - `/healthz` and `/ready` endpoints
+- [ ] **Logging** - Structured logs with request IDs
+- [ ] **Rate limiting** - Protect against abuse
+- [ ] **CORS** - Configure allowed origins
+- [ ] **Compression** - Enable gzip/brotli
+- [ ] **Error handling** - No stack traces in production
+- [ ] **Monitoring** - OpenTelemetry or similar
+- [ ] **Graceful shutdown** - Handle SIGTERM

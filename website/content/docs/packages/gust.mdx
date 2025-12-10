@@ -1,0 +1,179 @@
+---
+title: "@sylphx/gust"
+description: Main package with full server capabilities
+---
+
+The main package that re-exports from both `@sylphx/gust-app` and `@sylphx/gust-server`.
+
+## Installation
+
+```bash
+bun add @sylphx/gust
+```
+
+## When to Use
+
+Use `@sylphx/gust` when you want:
+
+- **Full server** with native Rust acceleration
+- **All features** in one import
+- **Maximum performance** (220k+ req/s)
+
+## Quick Example
+
+```typescript
+import { createApp, serve, get, json, cors, rateLimit, compose } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello World' })),
+    get('/users/:id', ({ ctx }) => json({ id: ctx.params.id })),
+  ],
+  middleware: compose(
+    cors(),
+    rateLimit({ max: 100, window: 60000 }),
+  ),
+})
+
+await serve({ app, port: 3000 })
+```
+
+## What's Included
+
+### From @sylphx/gust-app
+
+- `createApp` - Create applications
+- Route builders: `get`, `post`, `put`, `patch`, `del`, `all`, `routes`
+- Response helpers: `json`, `text`, `html`, `redirect`, `notFound`, etc.
+- Middleware: `cors`, `rateLimit`, `jwtAuth`, `validate`, etc.
+- Composition: `compose`, `pipe`
+
+### From @sylphx/gust-server
+
+- `serve` - Start HTTP server
+- `clusterServe` - Multi-core cluster mode
+- `websocket` - WebSocket handler
+- `sse` - Server-Sent Events
+- Health checks, streaming, and more
+
+## Examples
+
+### With Middleware
+
+```typescript
+import {
+  createApp,
+  serve,
+  get,
+  post,
+  json,
+  compose,
+  cors,
+  compress,
+  rateLimit,
+  jwtAuth,
+  validate,
+  object,
+  string,
+  getValidated,
+} from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/health', () => json({ status: 'ok' })),
+
+    get('/me', compose(
+      jwtAuth({ secret: process.env.JWT_SECRET! }),
+      ({ ctx }) => json(ctx.jwt)
+    )),
+
+    post('/users', compose(
+      validate({
+        body: object({
+          name: string({ minLength: 1 }),
+          email: string(),
+        }),
+      }),
+      ({ ctx }) => json(getValidated(ctx))
+    )),
+  ],
+
+  middleware: compose(
+    cors(),
+    compress(),
+    rateLimit({ max: 100, window: 60000 }),
+  ),
+})
+
+await serve({ app, port: 3000 })
+```
+
+### WebSocket
+
+```typescript
+import { serve, websocket } from '@sylphx/gust'
+
+await serve({
+  port: 3000,
+  fetch: websocket({
+    open: (ws) => ws.send('Welcome!'),
+    message: (ws, msg) => ws.send(`Echo: ${msg}`),
+    close: (ws) => console.log('Disconnected'),
+  }),
+})
+```
+
+### Server-Sent Events
+
+```typescript
+import { createApp, serve, get, sse } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/events', () =>
+      sse(async function* () {
+        for (let i = 0; i < 10; i++) {
+          yield { data: { count: i } }
+          await new Promise(r => setTimeout(r, 1000))
+        }
+      })
+    ),
+  ],
+})
+
+await serve({ app, port: 3000 })
+```
+
+### External Handler Integration
+
+```typescript
+import { createApp, serve, all, get, json } from '@sylphx/gust'
+import { createYoga, createSchema } from 'graphql-yoga'
+
+const yoga = createYoga({
+  schema: createSchema({
+    typeDefs: `type Query { hello: String }`,
+    resolvers: { Query: { hello: () => 'Hello!' } },
+  }),
+})
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello' })),
+    all('/graphql', yoga.fetch),
+  ],
+})
+
+await serve({ app, port: 3000 })
+```
+
+## Bundle Size
+
+| Component | Size |
+|-----------|------|
+| @sylphx/gust (re-exports) | ~87 B |
+| @sylphx/gust-app | 82 KB |
+| @sylphx/gust-server | 73 KB |
+| Native binary | 1.7 MB |
+
+Tree-shaking removes unused code in production builds.

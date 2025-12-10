@@ -1,0 +1,64 @@
+---
+title: Getting Started
+description: High-performance HTTP server framework for Bun and Node.js
+---
+
+## Introduction
+
+**Gust** is a high-performance HTTP server framework for Bun and Node.js, featuring:
+
+- **220k+ req/s** with native Rust acceleration (Hyper + Tokio)
+- **Portable apps** that run on Bun, Deno, Cloudflare Workers, AWS Lambda
+- **Type-safe** routing with path parameter inference
+- **20+ middleware** including auth, validation, rate limiting, and more
+- **Real-time** support with WebSocket, SSE, and HTTP/2
+
+## Performance
+
+| Runtime | Requests/sec | Latency |
+|---------|-------------|---------|
+| **Bun** | **232,704** | 417μs |
+| **Node.js** | **215,821** | 446μs |
+
+> Benchmarks: `bombardier -c 500 -d 10s` on Apple M3 Max
+
+## Installation
+
+```bash
+bun add @sylphx/gust
+# or
+npm install @sylphx/gust
+```
+
+## Quick Start
+
+```typescript
+import { createApp, serve, get, json, cors } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello World!' })),
+    get('/users/:id', ({ ctx }) => json({ id: ctx.params.id })),
+  ],
+  middleware: cors(),
+})
+
+await serve({ app, port: 3000 })
+```
+
+## Architecture
+
+Gust has a modular architecture:
+
+| Package | Description | Use Case |
+|---------|-------------|----------|
+| [@sylphx/gust](/docs/packages/gust) | Main package | Full server with all features |
+| [@sylphx/gust-app](/docs/packages/app) | Stateless framework | Serverless, Edge, portable |
+| [@sylphx/gust-server](/docs/packages/server) | Rust HTTP server | Maximum performance |
+| [@sylphx/gust-core](/docs/packages/core) | WASM utilities | Internal use |
+
+## Next Steps
+
+- [Full Server](/docs/packages/gust) - Use with native Rust acceleration
+- [Portable App](/docs/packages/app) - Deploy to serverless/edge
+- [Middleware Guide](/docs/guides/middleware) - Auth, validation, rate limiting

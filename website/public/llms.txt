@@ -1,0 +1,100 @@
+# Gust - High-Performance HTTP Server Framework
+
+> @sylphx/gust - HTTP server framework for Bun and Node.js with native Rust acceleration
+
+## Overview
+
+Gust is a high-performance HTTP server framework featuring:
+- 220k+ requests/second with native Rust acceleration (Hyper + Tokio)
+- Portable apps that run on Bun, Deno, Cloudflare Workers, AWS Lambda
+- Type-safe routing with path parameter inference
+- 20+ built-in middleware (auth, validation, rate limiting, etc.)
+- Real-time support with WebSocket, SSE, and HTTP/2
+
+## Installation
+
+```bash
+bun add @sylphx/gust
+# or
+npm install @sylphx/gust
+```
+
+## Quick Start
+
+```typescript
+import { createApp, serve, get, json, cors } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello World!' })),
+    get('/users/:id', ({ ctx }) => json({ id: ctx.params.id })),
+  ],
+  middleware: cors(),
+})
+
+await serve({ app, port: 3000 })
+```
+
+## Packages
+
+- @sylphx/gust - Main package, re-exports everything
+- @sylphx/gust-app - Portable app framework (serverless/edge)
+- @sylphx/gust-server - Rust-powered HTTP server
+- @sylphx/gust-core - WASM router and utilities
+
+## Documentation
+
+- Getting Started: https://gust.sylphx.com/docs
+- Installation: https://gust.sylphx.com/docs/installation
+- Quick Start: https://gust.sylphx.com/docs/quick-start
+- Packages: https://gust.sylphx.com/docs/packages/gust
+- Middleware: https://gust.sylphx.com/docs/guides/middleware
+- Routing: https://gust.sylphx.com/docs/guides/routing
+- Validation: https://gust.sylphx.com/docs/guides/validation
+- Authentication: https://gust.sylphx.com/docs/guides/authentication
+- Deployment: https://gust.sylphx.com/docs/guides/deployment
+- WebSocket: https://gust.sylphx.com/docs/server/websocket
+- SSE: https://gust.sylphx.com/docs/server/sse
+- Streaming: https://gust.sylphx.com/docs/server/streaming
+- Health Checks: https://gust.sylphx.com/docs/server/health-checks
+
+## Key Concepts
+
+### Route Builders
+- get(), post(), put(), patch(), del(), all() - Define routes
+- routes('/prefix', [...]) - Group routes with prefix
+
+### Response Helpers
+- json(data, options?) - JSON response
+- text(content) - Plain text response
+- html(content) - HTML response
+- redirect(url, status?) - Redirect response
+- notFound(), badRequest(), unauthorized(), forbidden(), serverError()
+
+### Middleware
+- cors() - CORS headers
+- rateLimit({ max, window }) - Rate limiting
+- jwtAuth({ secret }) - JWT authentication
+- validate({ body, query, params }) - Request validation
+- compress() - Response compression
+- session({ secret }) - Session management
+
+### Validation
+- object({ ... }) - Object schema
+- string(), number(), boolean() - Primitives
+- email(), url(), uuid() - String formats
+- array(schema) - Array of items
+- optional(schema), nullable(schema)
+
+### Server Features
+- serve({ app, port }) - Start HTTP server
+- clusterServe({ app, workers }) - Multi-core cluster
+- websocket({ open, message, close }) - WebSocket handler
+- sse(generator) - Server-Sent Events
+- streamFile(path) - File streaming
+
+## Links
+
+- GitHub: https://github.com/SylphxAI/gust
+- npm: https://www.npmjs.com/package/@sylphx/gust
+- Documentation: https://gust.sylphx.com

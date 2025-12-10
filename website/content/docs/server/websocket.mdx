@@ -1,0 +1,280 @@
+---
+title: WebSocket
+description: Native WebSocket support with binary frames and pub/sub
+---
+
+Gust provides native WebSocket support via `@sylphx/gust-server`.
+
+## Quick Example
+
+```typescript
+import { serve, websocket } from '@sylphx/gust'
+
+await serve({
+  port: 3000,
+  fetch: websocket({
+    open: (ws) => {
+      console.log('Client connected')
+      ws.send('Welcome!')
+    },
+    message: (ws, message) => {
+      if (typeof message === 'string') {
+        ws.send(`Echo: ${message}`)
+      } else {
+        // Binary data
+        ws.send(message)
+      }
+    },
+    close: (ws, code, reason) => {
+      console.log(`Disconnected: ${code}`)
+    },
+  }),
+})
+```
+
+## WebSocket Handler
+
+```typescript
+websocket({
+  // Called when connection opens
+  open: (ws) => {
+    ws.send('Connected!')
+  },
+
+  // Called for each message
+  message: (ws, message) => {
+    // message is string | ArrayBuffer
+  },
+
+  // Called when connection closes
+  close: (ws, code, reason) => {
+    console.log(`Closed: ${code} ${reason}`)
+  },
+
+  // Called on error
+  error: (ws, error) => {
+    console.error('WebSocket error:', error)
+  },
+
+  // Configuration
+  maxPayloadLength: 16 * 1024 * 1024,  // 16MB
+  idleTimeout: 120,                      // seconds
+})
+```
+
+## WebSocket Methods
+
+```typescript
+// Send text
+ws.send('Hello')
+
+// Send JSON
+ws.send(JSON.stringify({ type: 'update', data: {} }))
+
+// Send binary
+ws.send(new Uint8Array([1, 2, 3]))
+
+// Close connection
+ws.close(1000, 'Normal closure')
+
+// Check state
+ws.readyState  // 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+```
+
+## With Routes
+
+Combine WebSocket with regular HTTP routes:
+
+```typescript
+import { createApp, serve, get, json, websocket } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello' })),
+    get('/health', () => json({ status: 'ok' })),
+  ],
+})
+
+await serve({
+  app,
+  port: 3000,
+  // WebSocket on /ws path
+  websocket: websocket({
+    path: '/ws',
+    open: (ws) => ws.send('Connected'),
+    message: (ws, msg) => ws.send(`Echo: ${msg}`),
+  }),
+})
+```
+
+## Pub/Sub Pattern
+
+Broadcast messages to multiple clients:
+
+```typescript
+const clients = new Set<WebSocket>()
+
+await serve({
+  port: 3000,
+  fetch: websocket({
+    open: (ws) => {
+      clients.add(ws)
+      broadcast(`User joined. Total: ${clients.size}`)
+    },
+    message: (ws, message) => {
+      // Broadcast to all clients
+      broadcast(message)
+    },
+    close: (ws) => {
+      clients.delete(ws)
+      broadcast(`User left. Total: ${clients.size}`)
+    },
+  }),
+})
+
+function broadcast(message: string | ArrayBuffer) {
+  for (const client of clients) {
+    if (client.readyState === 1) {  // OPEN
+      client.send(message)
+    }
+  }
+}
+```
+
+## Rooms / Channels
+
+Group clients into rooms:
+
+```typescript
+const rooms = new Map<string, Set<WebSocket>>()
+
+function join(ws: WebSocket, room: string) {
+  if (!rooms.has(room)) {
+    rooms.set(room, new Set())
+  }
+  rooms.get(room)!.add(ws)
+}
+
+function leave(ws: WebSocket, room: string) {
+  rooms.get(room)?.delete(ws)
+}
+
+function broadcastToRoom(room: string, message: string) {
+  const clients = rooms.get(room)
+  if (!clients) return
+
+  for (const client of clients) {
+    if (client.readyState === 1) {
+      client.send(message)
+    }
+  }
+}
+
+await serve({
+  port: 3000,
+  fetch: websocket({
+    message: (ws, message) => {
+      const data = JSON.parse(message as string)
+
+      switch (data.type) {
+        case 'join':
+          join(ws, data.room)
+          break
+        case 'leave':
+          leave(ws, data.room)
+          break
+        case 'message':
+          broadcastToRoom(data.room, JSON.stringify({
+            type: 'message',
+            content: data.content,
+          }))
+          break
+      }
+    },
+    close: (ws) => {
+      // Clean up from all rooms
+      for (const room of rooms.values()) {
+        room.delete(ws)
+      }
+    },
+  }),
+})
+```
+
+## Authentication
+
+Authenticate during upgrade:
+
+```typescript
+await serve({
+  port: 3000,
+  fetch: websocket({
+    upgrade: async (request) => {
+      // Get token from query or header
+      const url = new URL(request.url)
+      const token = url.searchParams.get('token')
+
+      if (!token) {
+        return new Response('Unauthorized', { status: 401 })
+      }
+
+      try {
+        const user = await verifyJwt(token, secret)
+        return { user }  // Attach to ws.data
+      } catch {
+        return new Response('Invalid token', { status: 401 })
+      }
+    },
+    open: (ws) => {
+      console.log('User connected:', ws.data.user)
+    },
+  }),
+})
+```
+
+## Binary Data
+
+Handle binary messages:
+
+```typescript
+websocket({
+  message: (ws, message) => {
+    if (message instanceof ArrayBuffer) {
+      // Binary data
+      const bytes = new Uint8Array(message)
+      console.log('Received bytes:', bytes.length)
+
+      // Process and respond
+      const response = processBytes(bytes)
+      ws.send(response)
+    } else {
+      // Text data
+      ws.send(`Text: ${message}`)
+    }
+  },
+})
+```
+
+## Client Example
+
+```javascript
+const ws = new WebSocket('ws://localhost:3000/ws')
+
+ws.onopen = () => {
+  console.log('Connected')
+  ws.send(JSON.stringify({ type: 'hello' }))
+}
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data)
+  console.log('Received:', data)
+}
+
+ws.onclose = (event) => {
+  console.log(`Closed: ${event.code}`)
+}
+
+ws.onerror = (error) => {
+  console.error('Error:', error)
+}
+```

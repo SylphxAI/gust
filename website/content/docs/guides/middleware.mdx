@@ -1,0 +1,289 @@
+---
+title: Middleware
+description: Built-in middleware for security, auth, performance, and more
+---
+
+Gust includes 20+ production-ready middleware.
+
+## Composition
+
+Use `compose` (right-to-left) or `pipe` (left-to-right):
+
+```typescript
+import { compose, pipe } from '@sylphx/gust'
+
+// compose: outer middleware wraps inner
+const stack = compose(
+  cors(),           // 1st: runs first on request, last on response
+  rateLimit(),      // 2nd
+  handler           // 3rd: innermost
+)
+
+// pipe: left-to-right (more intuitive)
+const stack = pipe(
+  handler,          // 1st: innermost
+  rateLimit(),      // 2nd
+  cors()            // 3rd: outermost
+)
+```
+
+## Security
+
+### CORS
+
+```typescript
+import { cors, simpleCors } from '@sylphx/gust'
+
+// Full CORS with options
+cors({
+  origin: ['https://example.com'],
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+  maxAge: 86400,
+})
+
+// Simple CORS (allow all origins)
+simpleCors()
+```
+
+### Security Headers
+
+```typescript
+import { security, strictSecurity, apiSecurity } from '@sylphx/gust'
+
+// Basic security headers
+security()
+
+// Strict CSP and headers
+strictSecurity()
+
+// API-optimized security
+apiSecurity()
+```
+
+### Rate Limiting
+
+```typescript
+import { rateLimit, rateLimitWithStore } from '@sylphx/gust'
+
+// In-memory rate limiting
+rateLimit({
+  max: 100,           // Max requests
+  window: 60000,      // Per window (ms)
+  keyGenerator: (ctx) => ctx.headers['x-forwarded-for'] || 'anonymous',
+})
+
+// With custom store (Redis, etc.)
+rateLimitWithStore(redisStore, {
+  max: 100,
+  window: 60000,
+})
+```
+
+## Authentication
+
+### JWT
+
+```typescript
+import { jwtAuth, optionalJwt, createJwt, verifyJwt, getJwtPayload } from '@sylphx/gust'
+
+// Required JWT auth
+const protected = jwtAuth({ secret: 'your-secret' })
+
+// Optional JWT (doesn't fail if missing)
+const optionalAuth = optionalJwt({ secret: 'your-secret' })
+
+// Create tokens
+const token = await createJwt(
+  { userId: '123', role: 'admin' },
+  'your-secret',
+  { expiresIn: '1h' }
+)
+
+// Verify tokens
+const payload = await verifyJwt(token, 'your-secret')
+
+// In handler
+get('/me', compose(
+  jwtAuth({ secret: 'your-secret' }),
+  ({ ctx }) => json(getJwtPayload(ctx))
+))
+```
+
+### Basic Auth
+
+```typescript
+import { basicAuth } from '@sylphx/gust'
+
+basicAuth({
+  validate: async (username, password) => {
+    return username === 'admin' && password === 'secret'
+  }
+})
+```
+
+### Bearer Token
+
+```typescript
+import { bearerAuth } from '@sylphx/gust'
+
+bearerAuth({
+  validate: async (token) => {
+    return await validateToken(token)
+  }
+})
+```
+
+### API Key
+
+```typescript
+import { apiKeyAuth } from '@sylphx/gust'
+
+apiKeyAuth({
+  header: 'X-API-Key',  // or 'query' for ?api_key=xxx
+  validate: async (key) => {
+    return await validateApiKey(key)
+  }
+})
+```
+
+### Session & CSRF
+
+```typescript
+import { session, csrf, getSession, getCsrfToken } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/form', ({ ctx }) => html(`
+      <form method="POST" action="/submit">
+        <input type="hidden" name="_csrf" value="${getCsrfToken(ctx)}">
+        <button>Submit</button>
+      </form>
+    `)),
+
+    post('/submit', ({ ctx }) => {
+      const sess = getSession(ctx)
+      sess.data.visits = ((sess.data.visits as number) || 0) + 1
+      return json({ visits: sess.data.visits })
+    }),
+  ],
+  middleware: compose(
+    session({ secret: 'session-secret' }),
+    csrf({ secret: 'csrf-secret' }),
+  ),
+})
+```
+
+## Performance
+
+### Compression
+
+```typescript
+import { compress } from '@sylphx/gust'
+
+compress({
+  threshold: 1024,  // Min size to compress
+  level: 6,         // Compression level (1-9)
+})
+```
+
+### Caching
+
+```typescript
+import { cache, etag } from '@sylphx/gust'
+
+// Cache-Control headers
+cache({
+  maxAge: 3600,
+  staleWhileRevalidate: 60,
+  private: true,
+})
+
+// ETag support
+etag()
+```
+
+### Body Limits
+
+```typescript
+import { bodyLimit } from '@sylphx/gust'
+
+bodyLimit({
+  maxSize: 1024 * 1024,  // 1MB
+})
+```
+
+## Utilities
+
+### Logging
+
+```typescript
+import { logging } from '@sylphx/gust'
+
+logging({
+  format: 'combined',  // or 'short', 'dev', custom fn
+})
+```
+
+### Request Tracing
+
+```typescript
+import { tracing } from '@sylphx/gust'
+
+tracing({
+  headerName: 'X-Request-ID',
+  generator: () => crypto.randomUUID(),
+})
+```
+
+### Proxy Headers
+
+```typescript
+import { proxy } from '@sylphx/gust'
+
+// Trust proxy headers (X-Forwarded-For, etc.)
+proxy({
+  trustProxy: true,
+})
+```
+
+## Combining Middleware
+
+### Per-Route Middleware
+
+```typescript
+const app = createApp({
+  routes: [
+    // Public route
+    get('/', () => json({ public: true })),
+
+    // Protected route with middleware
+    get('/me', compose(
+      jwtAuth({ secret: 'xxx' }),
+      ({ ctx }) => json(getJwtPayload(ctx))
+    )),
+
+    // Route with validation + auth
+    post('/users', compose(
+      jwtAuth({ secret: 'xxx' }),
+      validate({ body: userSchema }),
+      ({ ctx }) => json(getValidated(ctx))
+    )),
+  ],
+})
+```
+
+### Global Middleware
+
+```typescript
+const app = createApp({
+  routes: [...],
+  middleware: compose(
+    cors(),
+    compress(),
+    rateLimit({ max: 100, window: 60000 }),
+    logging(),
+  ),
+})
+```

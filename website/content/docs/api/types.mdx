@@ -1,0 +1,292 @@
+---
+title: TypeScript Types
+description: Core types for Gust applications
+---
+
+Gust is written in TypeScript with full type inference.
+
+## Core Types
+
+### ServerResponse
+
+The response type returned by handlers:
+
+```typescript
+type ServerResponse = {
+  status: number
+  headers: Record<string, string>
+  body: string | Uint8Array | null
+}
+```
+
+### Handler
+
+A function that handles requests:
+
+```typescript
+type Handler<T = unknown> = (
+  args: HandlerArgs<T>
+) => ServerResponse | Promise<ServerResponse>
+
+type HandlerArgs<T = unknown> = {
+  ctx: Context<T>
+  input?: unknown
+}
+```
+
+### Context
+
+Request context passed to handlers:
+
+```typescript
+type Context<App = unknown> = {
+  // HTTP method
+  method: string
+
+  // Request path
+  path: string
+
+  // Query string (without ?)
+  query: string
+
+  // Request headers
+  headers: Record<string, string>
+
+  // Path parameters (from :param)
+  params: Record<string, string>
+
+  // Raw body
+  body: Uint8Array | null
+
+  // Parse body as JSON
+  json<T = unknown>(): Promise<T>
+
+  // Parse body as text
+  text(): Promise<string>
+
+  // User-defined app context
+  app: App
+
+  // Original Request object
+  request: Request
+}
+```
+
+### Wrapper (Middleware)
+
+A function that wraps handlers:
+
+```typescript
+type Wrapper<T = unknown> = (handler: Handler<T>) => Handler<T>
+```
+
+### Route
+
+A route definition:
+
+```typescript
+type Route<T = unknown> = {
+  method: string
+  path: string
+  handler: Handler<T>
+}
+```
+
+## Route Builder Types
+
+### RouteBuilder
+
+```typescript
+type RouteBuilder<App = unknown> = {
+  get: <P extends string>(
+    path: P,
+    handler: Handler<Context<App> & { params: ExtractParams<P> }>
+  ) => Route<App>
+
+  post: <P extends string>(path: P, handler: Handler<...>) => Route<App>
+  put: <P extends string>(path: P, handler: Handler<...>) => Route<App>
+  patch: <P extends string>(path: P, handler: Handler<...>) => Route<App>
+  del: <P extends string>(path: P, handler: Handler<...>) => Route<App>
+  all: <P extends string>(path: P, handler: Handler<...>) => Route<App>
+}
+```
+
+### Path Parameter Inference
+
+Gust infers path parameters from the route string:
+
+```typescript
+// ctx.params is typed as { id: string }
+get('/users/:id', ({ ctx }) => {
+  ctx.params.id  // string
+})
+
+// ctx.params is typed as { userId: string, postId: string }
+get('/users/:userId/posts/:postId', ({ ctx }) => {
+  ctx.params.userId  // string
+  ctx.params.postId  // string
+})
+```
+
+## App Types
+
+### CreateAppOptions
+
+```typescript
+type CreateAppOptions<App = unknown> = {
+  routes: Route<App>[]
+  middleware?: Wrapper<App>
+  notFound?: Handler<App>
+  onError?: (error: Error) => ServerResponse
+  context?: (baseCtx: BaseContext) => App
+}
+```
+
+### App
+
+```typescript
+type App<T = unknown> = {
+  // Standard fetch handler
+  fetch: (request: Request) => Promise<Response>
+
+  // Internal handler
+  handle: (ctx: Context<T>) => Promise<ServerResponse>
+
+  // Route manifest for native registration
+  manifest: RouteManifest
+}
+```
+
+## Server Types
+
+### ServeOptions
+
+```typescript
+type ServeOptions<App = unknown> = {
+  app?: App<App>
+  port?: number
+  hostname?: string
+
+  tls?: {
+    cert: string
+    key: string
+  }
+
+  onListen?: (info: { port: number; hostname: string }) => void
+  onError?: (error: Error) => void
+}
+```
+
+### Server
+
+```typescript
+type Server = {
+  close: () => Promise<void>
+  port: number
+  hostname: string
+}
+```
+
+## Validation Types
+
+### Schema
+
+```typescript
+type Schema<T> = {
+  parse: (value: unknown) => T
+  _type: T
+}
+
+// Infer type from schema
+type Infer<S extends Schema<unknown>> = S['_type']
+```
+
+### ValidateOptions
+
+```typescript
+type ValidateOptions<Body, Query, Params> = {
+  body?: Schema<Body>
+  query?: Schema<Query>
+  params?: Schema<Params>
+  headers?: Schema<Record<string, string>>
+  onError?: (errors: ValidationError[]) => ServerResponse
+}
+```
+
+## Typed App Context
+
+Create typed route builders with custom app context:
+
+```typescript
+import { createRouter, type Context } from '@sylphx/gust'
+
+// Define your app context
+type AppContext = {
+  db: Database
+  user: User | null
+  requestId: string
+}
+
+// Create typed builders
+const { get, post, routes } = createRouter<AppContext>()
+
+// ctx.app is now typed
+get('/users', ({ ctx }) => {
+  // ctx.app.db is Database
+  // ctx.app.user is User | null
+  // ctx.app.requestId is string
+  return json(ctx.app.db.getUsers())
+})
+```
+
+## Generic Handlers
+
+Create reusable generic handlers:
+
+```typescript
+function createCrudHandler<T>(resource: string) {
+  return {
+    list: get(`/${resource}`, async ({ ctx }) => {
+      const items = await ctx.app.db.findMany(resource)
+      return json(items)
+    }),
+
+    get: get(`/${resource}/:id`, async ({ ctx }) => {
+      const item = await ctx.app.db.findOne(resource, ctx.params.id)
+      return item ? json(item) : notFound()
+    }),
+
+    create: post(`/${resource}`, async ({ ctx }) => {
+      const data = await ctx.json<T>()
+      const item = await ctx.app.db.create(resource, data)
+      return json(item, { status: 201 })
+    }),
+
+    delete: del(`/${resource}/:id`, async ({ ctx }) => {
+      await ctx.app.db.delete(resource, ctx.params.id)
+      return json({ deleted: true })
+    }),
+  }
+}
+
+const userRoutes = createCrudHandler<User>('users')
+```
+
+## Type Utilities
+
+### ExtractParams
+
+Extract params type from path string:
+
+```typescript
+type ExtractParams<P extends string> =
+  P extends `${string}:${infer Param}/${infer Rest}`
+    ? { [K in Param | keyof ExtractParams<Rest>]: string }
+    : P extends `${string}:${infer Param}`
+      ? { [K in Param]: string }
+      : {}
+
+// Example
+type Params = ExtractParams<'/users/:userId/posts/:postId'>
+// { userId: string; postId: string }
+```

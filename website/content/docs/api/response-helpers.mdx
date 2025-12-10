@@ -1,0 +1,246 @@
+---
+title: Response Helpers
+description: Built-in functions for creating HTTP responses
+---
+
+Gust provides helper functions to create HTTP responses easily.
+
+## Basic Responses
+
+### json
+
+Create a JSON response:
+
+```typescript
+import { json } from '@sylphx/gust'
+
+// Simple JSON
+json({ message: 'Hello' })
+// Content-Type: application/json
+// Body: {"message":"Hello"}
+
+// With status
+json({ error: 'Not found' }, { status: 404 })
+
+// With headers
+json(data, {
+  status: 201,
+  headers: {
+    'X-Request-ID': requestId,
+  },
+})
+```
+
+### text
+
+Create a plain text response:
+
+```typescript
+import { text } from '@sylphx/gust'
+
+text('Hello World')
+// Content-Type: text/plain
+
+text('Error', { status: 500 })
+```
+
+### html
+
+Create an HTML response:
+
+```typescript
+import { html } from '@sylphx/gust'
+
+html('<h1>Hello</h1>')
+// Content-Type: text/html
+
+html(`
+  <!DOCTYPE html>
+  <html>
+    <head><title>Page</title></head>
+    <body><h1>Hello</h1></body>
+  </html>
+`)
+```
+
+### redirect
+
+Create a redirect response:
+
+```typescript
+import { redirect } from '@sylphx/gust'
+
+// 302 Found (temporary)
+redirect('/new-path')
+
+// 301 Moved Permanently
+redirect('/new-path', 301)
+
+// External redirect
+redirect('https://example.com')
+```
+
+### response
+
+Create a custom response:
+
+```typescript
+import { response } from '@sylphx/gust'
+
+response('Custom body', {
+  status: 200,
+  headers: {
+    'Content-Type': 'application/xml',
+    'X-Custom': 'header',
+  },
+})
+
+// Binary response
+response(new Uint8Array([1, 2, 3]), {
+  status: 200,
+  headers: {
+    'Content-Type': 'application/octet-stream',
+  },
+})
+
+// Empty response
+response(null, { status: 204 })
+```
+
+## Error Responses
+
+### notFound
+
+404 Not Found:
+
+```typescript
+import { notFound } from '@sylphx/gust'
+
+notFound()
+// Status: 404
+// Body: {"error":"Not Found"}
+
+notFound({ error: 'User not found' })
+```
+
+### badRequest
+
+400 Bad Request:
+
+```typescript
+import { badRequest } from '@sylphx/gust'
+
+badRequest()
+badRequest({ error: 'Invalid input', field: 'email' })
+```
+
+### unauthorized
+
+401 Unauthorized:
+
+```typescript
+import { unauthorized } from '@sylphx/gust'
+
+unauthorized()
+unauthorized({ error: 'Token expired' })
+```
+
+### forbidden
+
+403 Forbidden:
+
+```typescript
+import { forbidden } from '@sylphx/gust'
+
+forbidden()
+forbidden({ error: 'Insufficient permissions' })
+```
+
+### serverError
+
+500 Internal Server Error:
+
+```typescript
+import { serverError } from '@sylphx/gust'
+
+serverError()
+serverError({ error: 'Database connection failed' })
+```
+
+## Response Options
+
+All response helpers accept options:
+
+```typescript
+type ResponseOptions = {
+  status?: number
+  headers?: Record<string, string>
+}
+
+json(data, { status: 201, headers: { 'X-Custom': 'value' } })
+text(content, { status: 200 })
+html(markup, { headers: { 'Cache-Control': 'max-age=3600' } })
+```
+
+## ServerResponse Type
+
+All helpers return `ServerResponse`:
+
+```typescript
+type ServerResponse = {
+  status: number
+  headers: Record<string, string>
+  body: string | Uint8Array | null
+}
+```
+
+## Async Handlers
+
+Response helpers work with async handlers:
+
+```typescript
+get('/users/:id', async ({ ctx }) => {
+  const user = await db.getUser(ctx.params.id)
+
+  if (!user) {
+    return notFound({ error: 'User not found' })
+  }
+
+  return json(user)
+})
+```
+
+## Conditional Responses
+
+```typescript
+get('/data', ({ ctx }) => {
+  const format = ctx.query.includes('format=xml')
+
+  if (format) {
+    return response(toXml(data), {
+      headers: { 'Content-Type': 'application/xml' },
+    })
+  }
+
+  return json(data)
+})
+```
+
+## With Middleware
+
+Response helpers work seamlessly with middleware:
+
+```typescript
+get('/protected', compose(
+  jwtAuth({ secret }),
+  ({ ctx }) => {
+    const payload = getJwtPayload(ctx)
+
+    if (!payload.admin) {
+      return forbidden({ error: 'Admin access required' })
+    }
+
+    return json({ admin: true })
+  }
+))
+```

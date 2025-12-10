@@ -1,0 +1,105 @@
+---
+title: Quick Start
+description: Build your first Gust server in 5 minutes
+---
+
+## Create Your First Server
+
+After [installing Gust](/docs/installation), create a new file:
+
+```typescript title="server.ts"
+import { createApp, serve, get, post, json, cors } from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello World!' })),
+    get('/users/:id', ({ ctx }) => json({ id: ctx.params.id })),
+    post('/users', async ({ ctx }) => {
+      const body = await ctx.json()
+      return json({ created: body })
+    }),
+  ],
+  middleware: cors(),
+})
+
+await serve({ app, port: 3000 })
+console.log('Server running at http://localhost:3000')
+```
+
+Run it:
+
+```bash
+bun run server.ts
+```
+
+## Understanding the Code
+
+### createApp
+
+Creates a stateless application with routes and middleware:
+
+```typescript
+const app = createApp({
+  routes: [...],        // Required: your route definitions
+  middleware: cors(),   // Optional: global middleware
+  notFound: handler,    // Optional: 404 handler
+  onError: handler,     // Optional: error handler
+})
+```
+
+### Route Builders
+
+Define routes with HTTP method helpers:
+
+```typescript
+import { get, post, put, patch, del, all } from '@sylphx/gust'
+
+get('/path', handler)      // GET requests
+post('/path', handler)     // POST requests
+put('/path', handler)      // PUT requests
+patch('/path', handler)    // PATCH requests
+del('/path', handler)      // DELETE requests (del not delete)
+all('/path', handler)      // Any HTTP method
+```
+
+### Handler Context
+
+Handlers receive `ctx` with request data:
+
+```typescript
+get('/users/:id', ({ ctx }) => {
+  ctx.method     // 'GET', 'POST', etc.
+  ctx.path       // '/users/123'
+  ctx.params     // { id: '123' } - typed!
+  ctx.query      // '?foo=bar'
+  ctx.headers    // Request headers
+  ctx.json()     // Parse JSON body
+  ctx.request    // Original Request object
+
+  return json({ id: ctx.params.id })
+})
+```
+
+### Response Helpers
+
+Return responses easily:
+
+```typescript
+import { json, text, html, redirect, notFound } from '@sylphx/gust'
+
+json({ data: 'value' })              // JSON response
+json({ error: 'msg' }, { status: 400 }) // With status
+text('Hello')                        // Plain text
+html('<h1>Hello</h1>')               // HTML
+redirect('/new-path')                // 302 redirect
+notFound()                           // 404 response
+```
+
+## Next Steps
+
+Now that you have a basic server running:
+
+1. **[Add Middleware](/docs/guides/middleware)** - Auth, validation, rate limiting
+2. **[Route Grouping](/docs/guides/routing)** - Organize routes with prefixes
+3. **[WebSocket](/docs/server/websocket)** - Real-time communication
+4. **[Deploy](/docs/guides/deployment)** - Production deployment options

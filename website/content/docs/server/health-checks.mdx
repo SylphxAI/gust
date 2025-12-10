@@ -1,0 +1,258 @@
+---
+title: Health Checks
+description: Kubernetes-ready health endpoints for production deployments
+---
+
+Gust provides production-ready health check endpoints for container orchestrators.
+
+## Quick Setup
+
+```typescript
+import {
+  liveness,
+  readiness,
+  startup,
+  health,
+  memoryCheck,
+} from '@sylphx/gust'
+
+const app = createApp({
+  routes: [
+    get('/healthz', liveness()),
+    get('/ready', readiness([memoryCheck(90)])),
+    get('/health', health({ detailed: true })),
+  ],
+})
+```
+
+## Probe Types
+
+### Liveness Probe
+
+Returns 200 if the process is alive:
+
+```typescript
+get('/healthz', liveness())
+// Returns: { status: 'ok' }
+```
+
+Use for: Detecting if the process is stuck or deadlocked.
+
+### Readiness Probe
+
+Returns 200 if ready to accept traffic:
+
+```typescript
+get('/ready', readiness([
+  memoryCheck(90),
+  eventLoopCheck(100),
+]))
+// Returns: { status: 'ok' } or { status: 'fail', checks: [...] }
+```
+
+Use for: Load balancer health checks, traffic routing.
+
+### Startup Probe
+
+Returns 200 when startup is complete:
+
+```typescript
+get('/startup', startup([
+  httpCheck('http://database:5432'),
+  httpCheck('http://cache:6379'),
+]))
+```
+
+Use for: Slow-starting containers, dependency initialization.
+
+## Built-in Checks
+
+### Memory Check
+
+Fail if memory usage exceeds threshold:
+
+```typescript
+memoryCheck(90)  // Fail if >90% heap used
+memoryCheck(80, 'warning')  // Warning level
+```
+
+### Event Loop Check
+
+Fail if event loop is blocked:
+
+```typescript
+eventLoopCheck(100)  // Fail if >100ms lag
+```
+
+### HTTP Check
+
+Check external service availability:
+
+```typescript
+httpCheck('http://database:5432/health')
+httpCheck('http://cache:6379/ping', {
+  timeout: 5000,
+  headers: { 'Authorization': 'Bearer xxx' },
+})
+```
+
+### Custom Check
+
+Create your own checks:
+
+```typescript
+customCheck('database', async () => {
+  try {
+    await db.query('SELECT 1')
+    return { healthy: true }
+  } catch (error) {
+    return {
+      healthy: false,
+      message: error.message,
+    }
+  }
+})
+
+customCheck('redis', async () => {
+  const pong = await redis.ping()
+  return { healthy: pong === 'PONG' }
+})
+```
+
+## Detailed Health
+
+Get full health status:
+
+```typescript
+get('/health', health({
+  checks: [
+    memoryCheck(90),
+    eventLoopCheck(100),
+    customCheck('database', async () => {
+      const start = Date.now()
+      await db.query('SELECT 1')
+      return {
+        healthy: true,
+        latency: Date.now() - start,
+      }
+    }),
+    customCheck('redis', async () => {
+      await redis.ping()
+      return { healthy: true }
+    }),
+  ],
+  detailed: true,
+}))
+```
+
+Response:
+```json
+{
+  "status": "ok",
+  "uptime": 12345,
+  "timestamp": "2024-01-01T00:00:00.000Z",
+  "checks": {
+    "memory": {
+      "healthy": true,
+      "usage": 45.2
+    },
+    "eventLoop": {
+      "healthy": true,
+      "lag": 2
+    },
+    "database": {
+      "healthy": true,
+      "latency": 5
+    },
+    "redis": {
+      "healthy": true
+    }
+  }
+}
+```
+
+## Kubernetes Configuration
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: app
+          image: myapp:latest
+          ports:
+            - containerPort: 3000
+
+          # Liveness: restart if stuck
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Readiness: stop traffic if unhealthy
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+
+          # Startup: wait for slow start
+          startupProbe:
+            httpGet:
+              path: /startup
+              port: 3000
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30  # 150s max startup
+```
+
+## Metrics Endpoint
+
+Export Prometheus metrics:
+
+```typescript
+import { metrics, prometheusMetrics } from '@sylphx/gust'
+
+const routes = [
+  get('/metrics', metrics()),
+  get('/metrics/prometheus', prometheusMetrics()),
+]
+```
+
+## Best Practices
+
+1. **Liveness should be simple** - Just check if process is alive
+2. **Readiness checks dependencies** - Database, cache, external APIs
+3. **Don't share endpoints** - Separate `/healthz` from `/ready`
+4. **Set appropriate timeouts** - Match probe config to check duration
+5. **Log failures** - Track why checks fail
+6. **Graceful degradation** - Handle partial failures
+
+```typescript
+// Good: Simple liveness
+get('/healthz', liveness())
+
+// Good: Comprehensive readiness
+get('/ready', readiness([
+  memoryCheck(90),
+  customCheck('db', () => checkDatabase()),
+  customCheck('cache', () => checkRedis()),
+]))
+
+// Good: Detailed for debugging
+get('/health', compose(
+  // Require auth for detailed health
+  basicAuth({ validate: adminOnly }),
+  health({ detailed: true, checks: [...] })
+))
+```

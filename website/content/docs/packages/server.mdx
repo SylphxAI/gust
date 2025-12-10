@@ -1,0 +1,329 @@
+---
+title: "@sylphx/gust-server"
+description: High-performance Rust-powered HTTP server - 220k+ requests/second
+---
+
+High-performance HTTP server powered by Rust (Hyper + Tokio) via napi-rs.
+
+## Installation
+
+```bash
+bun add @sylphx/gust-server @sylphx/gust-app
+```
+
+## When to Use
+
+Use `@sylphx/gust-server` when you need:
+
+- **Maximum performance** - Native Rust with io_uring on Linux
+- **Long-lived connections** - WebSocket, SSE, HTTP/2 streams
+- **Multi-core scaling** - Automatic cluster mode
+- **Production features** - Health checks, graceful shutdown, OpenTelemetry
+
+## Performance
+
+| Runtime | Requests/sec | Latency |
+|---------|-------------|---------|
+| **Bun** | **232,704** | 417μs |
+| **Node.js** | **215,821** | 446μs |
+
+## Quick Example
+
+```typescript
+import { createApp, get, json } from '@sylphx/gust-app'
+import { serve } from '@sylphx/gust-server'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello World' })),
+  ],
+})
+
+await serve({ app, port: 3000 })
+// Server running at http://localhost:3000
+// Using native Rust acceleration (215k+ req/s)
+```
+
+## API
+
+### serve
+
+Start the HTTP server with native acceleration.
+
+```typescript
+const server = await serve({
+  // App instance (recommended)
+  app,
+
+  // Server options
+  port: 3000,
+  hostname: '0.0.0.0',
+
+  // TLS (HTTPS)
+  tls: {
+    cert: './cert.pem',
+    key: './key.pem',
+  },
+
+  // Callbacks
+  onListen: ({ port, hostname }) => {
+    console.log(`Server running at http://${hostname}:${port}`)
+  },
+  onError: (error) => {
+    console.error('Server error:', error)
+  },
+})
+
+// Graceful shutdown
+await server.close()
+```
+
+### Cluster Mode
+
+Spawn workers across all CPU cores:
+
+```typescript
+import { clusterServe, isPrimary, isWorker } from '@sylphx/gust-server'
+
+if (isPrimary()) {
+  console.log('Primary process starting workers...')
+}
+
+await clusterServe({
+  app,
+  port: 3000,
+  workers: 4,  // or 'auto' for CPU count
+  onWorkerStart: (worker) => {
+    console.log(`Worker ${worker.id} started`)
+  },
+})
+```
+
+### HTTP/2
+
+Full HTTP/2 support with server push:
+
+```typescript
+import { serveHttp2, pushResource, isHttp2 } from '@sylphx/gust-server'
+
+await serveHttp2({
+  app,
+  port: 443,
+  cert: './cert.pem',
+  key: './key.pem',
+})
+
+// Server push
+get('/page', ({ ctx }) => {
+  if (isHttp2(ctx)) {
+    pushResource(ctx, '/styles.css')
+    pushResource(ctx, '/script.js')
+  }
+  return html('<html>...</html>')
+})
+```
+
+### WebSocket
+
+Native WebSocket support:
+
+```typescript
+import { websocket } from '@sylphx/gust-server'
+
+await serve({
+  port: 3000,
+  fetch: websocket({
+    open: (ws) => {
+      console.log('Client connected')
+      ws.send('Welcome!')
+    },
+    message: (ws, message) => {
+      if (typeof message === 'string') {
+        ws.send(`Echo: ${message}`)
+      } else {
+        ws.send(message) // Binary data
+      }
+    },
+    close: (ws, code, reason) => {
+      console.log(`Client disconnected: ${code}`)
+    },
+  }),
+})
+```
+
+### Server-Sent Events
+
+```typescript
+import { sse, nativeSSE } from '@sylphx/gust-server'
+
+// Generator mode (pull-based)
+get('/events', () =>
+  sse(async function* () {
+    for (let i = 0; i < 10; i++) {
+      yield { data: { count: i }, id: String(i) }
+      await new Promise(r => setTimeout(r, 1000))
+    }
+  })
+)
+
+// Handler mode (push-based)
+get('/notifications', () =>
+  sse(async (emit) => {
+    emit({ data: 'connected' })
+
+    const handler = (data: unknown) => emit({ data })
+    pubsub.subscribe('updates', handler)
+
+    return () => pubsub.unsubscribe('updates', handler)
+  })
+)
+```
+
+### Streaming
+
+```typescript
+import {
+  stream,
+  streamText,
+  streamFile,
+  ndjsonStream,
+  createJsonStream,
+} from '@sylphx/gust-server'
+
+// Text streaming
+get('/text', () =>
+  streamText(async function* () {
+    yield 'Hello '
+    yield 'World!'
+  })
+)
+
+// File streaming with range support
+get('/video/:name', ({ ctx }) =>
+  streamFile(`./videos/${ctx.params.name}`, {
+    contentType: 'video/mp4',
+  })
+)
+
+// NDJSON streaming
+get('/data', () =>
+  ndjsonStream(async function* () {
+    yield { id: 1, name: 'Alice' }
+    yield { id: 2, name: 'Bob' }
+  })
+)
+```
+
+### Health Checks
+
+Kubernetes-ready health endpoints:
+
+```typescript
+import {
+  liveness,
+  readiness,
+  startup,
+  health,
+  memoryCheck,
+  eventLoopCheck,
+  httpCheck,
+  customCheck,
+} from '@sylphx/gust-server'
+
+const routes = [
+  // Simple probes
+  get('/healthz', liveness()),
+  get('/ready', readiness([memoryCheck(90)])),
+  get('/startup', startup([httpCheck('http://db:5432')])),
+
+  // Detailed health
+  get('/health', health({
+    checks: [
+      memoryCheck(90),
+      eventLoopCheck(100),
+      customCheck('database', async () => {
+        await db.ping()
+        return { healthy: true }
+      }),
+    ],
+    detailed: true,
+  })),
+]
+```
+
+### Circuit Breaker
+
+Protect against cascading failures:
+
+```typescript
+import { circuitBreaker, bulkhead } from '@sylphx/gust-server'
+
+// As middleware
+get('/external', compose(
+  circuitBreaker({
+    failureThreshold: 5,
+    resetTimeout: 30000,
+    halfOpenRequests: 3,
+  }),
+  async () => {
+    const res = await fetch('https://api.example.com')
+    return json(await res.json())
+  }
+))
+
+// Bulkhead (limit concurrent requests)
+get('/limited', compose(
+  bulkhead({ maxConcurrent: 10, maxQueue: 100 }),
+  handler
+))
+```
+
+### OpenTelemetry
+
+Distributed tracing and metrics:
+
+```typescript
+import {
+  otel,
+  createTracer,
+  consoleExporter,
+  createOtlpExporter,
+} from '@sylphx/gust-server'
+
+// OTLP exporter (production)
+const tracer = createTracer(createOtlpExporter({
+  endpoint: 'http://jaeger:4318/v1/traces',
+}))
+
+await serve({
+  app,
+  middleware: otel({
+    tracer,
+    serviceName: 'my-service',
+    recordHeaders: true,
+  }),
+})
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    @sylphx/gust-server                       │
+│            serve() • cluster • HTTP/2 • WebSocket            │
+├─────────────────────────────────────────────────────────────┤
+│     Native (Rust)       │          WASM Fallback            │
+│   hyper + tokio         │       Universal runtime           │
+│   napi-rs bindings      │       HTTP parser + router        │
+│   io_uring on Linux     │                                   │
+│   215K+ req/s           │                                   │
+└─────────────────────────┴───────────────────────────────────┘
+```
+
+## Bundle Size
+
+| Component | Size |
+|-----------|------|
+| JavaScript | 73 KB |
+| Type Definitions | 41 KB |
+| Native Binary | 1.7 MB |

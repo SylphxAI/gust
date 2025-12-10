@@ -1,0 +1,224 @@
+---
+title: "@sylphx/gust-app"
+description: Stateless HTTP application framework - portable across runtimes
+---
+
+Stateless HTTP application framework that works on Bun, Deno, Cloudflare Workers, AWS Lambda, and more.
+
+## Installation
+
+```bash
+bun add @sylphx/gust-app
+```
+
+## When to Use
+
+Use `@sylphx/gust-app` when you want:
+
+- **Serverless** - AWS Lambda, Cloudflare Workers, Vercel Edge
+- **Portable code** - Same app across different runtimes
+- **BYO server** - Use with `Bun.serve()`, `Deno.serve()`, etc.
+- **Testing** - Easy to test without starting a server
+
+## Quick Example
+
+```typescript
+import { createApp, get, post, json, cors } from '@sylphx/gust-app'
+
+const app = createApp({
+  routes: [
+    get('/', () => json({ message: 'Hello World' })),
+    get('/users/:id', ({ ctx }) => json({ id: ctx.params.id })),
+    post('/users', async ({ ctx }) => {
+      const body = await ctx.json()
+      return json({ created: body })
+    }),
+  ],
+  middleware: cors(),
+})
+
+// Use with any runtime
+Bun.serve({ fetch: app.fetch, port: 3000 })
+```
+
+## API
+
+### createApp
+
+```typescript
+const app = createApp({
+  // Routes (required)
+  routes: [
+    get('/', () => json({ hello: 'world' })),
+  ],
+
+  // Global middleware (optional)
+  middleware: compose(
+    cors(),
+    rateLimit({ max: 100, window: 60000 }),
+  ),
+
+  // 404 handler (optional)
+  notFound: () => json({ error: 'Not Found' }, { status: 404 }),
+
+  // Error handler (optional)
+  onError: (error) => json({ error: error.message }, { status: 500 }),
+})
+
+// App instance provides:
+app.fetch      // (Request) => Promise<Response>
+app.handle     // (Context) => Promise<ServerResponse>
+app.manifest   // RouteManifest for native registration
+```
+
+### Route Builders
+
+```typescript
+import { get, post, put, patch, del, head, options, all, routes } from '@sylphx/gust-app'
+
+// HTTP methods
+get('/path', handler)
+post('/path', handler)
+put('/path', handler)
+patch('/path', handler)
+del('/path', handler)    // 'delete' is reserved
+head('/path', handler)
+options('/path', handler)
+all('/path', handler)    // Match any method
+
+// Route grouping with prefix
+const apiRoutes = routes('/api', [
+  get('/users', listUsers),
+  get('/users/:id', getUser),
+  post('/users', createUser),
+])
+
+// Nested groups
+const v1Routes = routes('/v1', [
+  ...routes('/users', [
+    get('/', list),
+    get('/:id', show),
+  ]),
+])
+```
+
+### Handler Signature
+
+```typescript
+get('/users/:id', ({ ctx, input }) => {
+  // ctx properties
+  ctx.method     // 'GET', 'POST', etc.
+  ctx.path       // '/users/123'
+  ctx.query      // '?foo=bar' query string
+  ctx.headers    // Record<string, string>
+  ctx.params     // { id: '123' } - typed from path!
+  ctx.body       // Raw body buffer
+  ctx.json<T>()  // Parse JSON body
+  ctx.app        // User-defined app context
+  ctx.request    // Original Request (for delegation)
+
+  return json({ id: ctx.params.id })
+})
+```
+
+### Response Helpers
+
+```typescript
+import {
+  json,
+  text,
+  html,
+  redirect,
+  response,
+  notFound,
+  badRequest,
+  unauthorized,
+  forbidden,
+  serverError,
+} from '@sylphx/gust-app'
+
+json({ data: 'value' })              // application/json
+json({ error: 'msg' }, { status: 400 })
+text('Hello')                        // text/plain
+html('<h1>Hello</h1>')               // text/html
+redirect('/new-path')                // 302 redirect
+redirect('/new-path', 301)           // 301 redirect
+response(body, { status, headers })  // Custom response
+
+// Error responses
+notFound()         // 404
+badRequest()       // 400
+unauthorized()     // 401
+forbidden()        // 403
+serverError()      // 500
+```
+
+## Built-in Middleware
+
+| Category | Features |
+|----------|----------|
+| **Security** | CORS, CSRF, Security headers, Rate limiting |
+| **Auth** | Basic, Bearer, API Key, HMAC, JWT, Session |
+| **Performance** | Compression, Caching, Body limits |
+| **Utilities** | Validation, Body parsing, Cookies, Proxy headers |
+| **Observability** | Request tracing, Logging |
+
+See [Middleware Guide](/docs/guides/middleware) for details.
+
+## Runtime Examples
+
+### Bun
+
+```typescript
+Bun.serve({
+  fetch: app.fetch,
+  port: 3000,
+})
+```
+
+### Deno
+
+```typescript
+Deno.serve({ port: 3000 }, app.fetch)
+```
+
+### Cloudflare Workers
+
+```typescript
+export default {
+  fetch: app.fetch,
+}
+```
+
+### AWS Lambda
+
+```typescript
+export const handler = async (event: APIGatewayProxyEventV2) => {
+  const request = new Request(
+    `https://lambda.local${event.rawPath}`,
+    {
+      method: event.requestContext.http.method,
+      headers: event.headers as HeadersInit,
+      body: event.body,
+    }
+  )
+
+  const response = await app.fetch(request)
+
+  return {
+    statusCode: response.status,
+    headers: Object.fromEntries(response.headers),
+    body: await response.text(),
+  }
+}
+```
+
+## Bundle Size
+
+| Component | Size | Gzipped |
+|-----------|------|---------|
+| JavaScript | 82 KB | 18 KB |
+| Type Definitions | 47 KB | 12 KB |
+| WASM (router) | 27 KB | 12 KB |
+
+Tree-shaking removes unused middleware in production builds.

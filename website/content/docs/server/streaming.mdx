@@ -1,0 +1,286 @@
+---
+title: Streaming
+description: File streaming, NDJSON, and range requests
+---
+
+Gust provides multiple streaming capabilities for large data transfers.
+
+## Text Streaming
+
+Stream text content progressively:
+
+```typescript
+import { streamText } from '@sylphx/gust'
+
+get('/stream', () =>
+  streamText(async function* () {
+    yield 'Hello '
+    await new Promise(r => setTimeout(r, 100))
+    yield 'World!'
+  })
+)
+```
+
+## File Streaming
+
+Stream files with automatic Content-Type:
+
+```typescript
+import { streamFile } from '@sylphx/gust'
+
+get('/download/:filename', ({ ctx }) =>
+  streamFile(`./files/${ctx.params.filename}`)
+)
+
+// With options
+get('/video/:name', ({ ctx }) =>
+  streamFile(`./videos/${ctx.params.name}`, {
+    contentType: 'video/mp4',
+    headers: {
+      'Cache-Control': 'public, max-age=86400',
+    },
+  })
+)
+```
+
+## Range Requests
+
+Support video/audio seeking and resumable downloads:
+
+```typescript
+import { serveRangeFile, rangeServer } from '@sylphx/gust'
+
+// Single file with range support
+get('/video/:id', ({ ctx }) =>
+  serveRangeFile(ctx, `./videos/${ctx.params.id}.mp4`)
+)
+
+// Directory server with range support
+const mediaHandler = rangeServer({
+  root: './media',
+  maxAge: 86400,
+  extensions: ['.mp4', '.webm', '.mp3', '.wav'],
+})
+
+get('/media/*', mediaHandler)
+```
+
+## NDJSON Streaming
+
+Stream newline-delimited JSON (great for large datasets):
+
+```typescript
+import { ndjsonStream } from '@sylphx/gust'
+
+get('/users', () =>
+  ndjsonStream(async function* () {
+    for await (const user of db.streamUsers()) {
+      yield user  // Each object on its own line
+    }
+  })
+)
+```
+
+Output format:
+```
+{"id":1,"name":"Alice"}
+{"id":2,"name":"Bob"}
+{"id":3,"name":"Charlie"}
+```
+
+## JSON Array Streaming
+
+Stream as a JSON array:
+
+```typescript
+import { createJsonStream } from '@sylphx/gust'
+
+get('/data', () =>
+  createJsonStream(async function* () {
+    yield { id: 1, name: 'First' }
+    yield { id: 2, name: 'Second' }
+  })
+)
+```
+
+Output format:
+```json
+[
+{"id":1,"name":"First"},
+{"id":2,"name":"Second"}
+]
+```
+
+## Raw Stream
+
+Create custom streams:
+
+```typescript
+import { stream } from '@sylphx/gust'
+
+get('/custom', () =>
+  stream(async function* () {
+    const encoder = new TextEncoder()
+
+    yield encoder.encode('Part 1\n')
+    await new Promise(r => setTimeout(r, 100))
+    yield encoder.encode('Part 2\n')
+  }, {
+    headers: {
+      'Content-Type': 'text/plain',
+    },
+  })
+)
+```
+
+## Real-World Examples
+
+### AI Response Streaming
+
+```typescript
+get('/ai/chat', compose(
+  validate({ query: object({ prompt: string() }) }),
+  async ({ ctx }) => {
+    const { prompt } = getValidatedQuery(ctx)
+
+    return streamText(async function* () {
+      const stream = await openai.chat.completions.create({
+        model: 'gpt-4',
+        messages: [{ role: 'user', content: prompt }],
+        stream: true,
+      })
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content
+        if (content) yield content
+      }
+    })
+  }
+))
+```
+
+### Database Export
+
+```typescript
+get('/export/users', () =>
+  ndjsonStream(async function* () {
+    const batchSize = 1000
+    let offset = 0
+
+    while (true) {
+      const users = await db.users.findMany({
+        skip: offset,
+        take: batchSize,
+      })
+
+      if (users.length === 0) break
+
+      for (const user of users) {
+        yield {
+          id: user.id,
+          email: user.email,
+          createdAt: user.createdAt.toISOString(),
+        }
+      }
+
+      offset += batchSize
+    }
+  })
+)
+```
+
+### Log Streaming
+
+```typescript
+get('/logs/:service', ({ ctx }) =>
+  streamText(async function* () {
+    const process = Bun.spawn(['tail', '-f', `/var/log/${ctx.params.service}.log`])
+
+    const reader = process.stdout.getReader()
+    const decoder = new TextDecoder()
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        yield decoder.decode(value)
+      }
+    } finally {
+      process.kill()
+    }
+  })
+)
+```
+
+### Chunked Upload Processing
+
+```typescript
+post('/upload/process', async ({ ctx }) => {
+  const chunks: Uint8Array[] = []
+
+  // Collect chunks
+  for await (const chunk of ctx.request.body!) {
+    chunks.push(chunk)
+  }
+
+  // Process and stream results
+  return ndjsonStream(async function* () {
+    const data = Buffer.concat(chunks)
+    const lines = data.toString().split('\n')
+
+    for (const line of lines) {
+      const result = await processLine(line)
+      yield { line, result }
+    }
+  })
+})
+```
+
+## Client Consumption
+
+### Fetch API
+
+```javascript
+const response = await fetch('/stream')
+const reader = response.body.getReader()
+const decoder = new TextDecoder()
+
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  console.log(decoder.decode(value))
+}
+```
+
+### NDJSON Parsing
+
+```javascript
+const response = await fetch('/users')
+const reader = response.body.getReader()
+const decoder = new TextDecoder()
+let buffer = ''
+
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+
+  buffer += decoder.decode(value, { stream: true })
+  const lines = buffer.split('\n')
+  buffer = lines.pop()!  // Keep incomplete line
+
+  for (const line of lines) {
+    if (line) {
+      const user = JSON.parse(line)
+      console.log('User:', user)
+    }
+  }
+}
+```
+
+## Performance Tips
+
+1. **Use generators** - Memory-efficient for large datasets
+2. **Batch database queries** - Don't query one row at a time
+3. **Set appropriate headers** - `Content-Type`, `Cache-Control`
+4. **Handle backpressure** - Generators naturally handle this
+5. **Clean up resources** - Use try/finally for cleanup
