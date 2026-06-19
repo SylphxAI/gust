@@ -1,4 +1,4 @@
 {
-  "title": "Guides",
-  "pages": ["middleware", "routing", "validation", "authentication", "deployment"]
+	"title": "Guides",
+	"pages": ["middleware", "routing", "validation", "authentication", "deployment"]
 }
