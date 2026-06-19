@@ -1,4 +1,4 @@
 {
-  "title": "Packages",
-  "pages": ["gust", "app", "server", "core"]
+	"title": "Packages",
+	"pages": ["gust", "app", "server", "core"]
 }

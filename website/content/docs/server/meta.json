@@ -1,4 +1,4 @@
 {
-  "title": "Server",
-  "pages": ["websocket", "sse", "streaming", "health-checks"]
+	"title": "Server",
+	"pages": ["websocket", "sse", "streaming", "health-checks"]
 }
