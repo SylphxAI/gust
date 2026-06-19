@@ -205,4 +205,4 @@ MIT
 
 ---
 
-Built with [Sylphx](https://github.com/SylphxAI) | [@sylphx/biome-config](https://github.com/SylphxAI/biome-config) | [@sylphx/bump](https://github.com/SylphxAI/bump) | [@sylphx/doctor](https://github.com/SylphxAI/doctor)
+Built with [Sylphx](https://github.com/SylphxAI) | [@sylphx/biome-config](https://github.com/SylphxAI/biome-config) | [@sylphx/bump](https://github.com/SylphxAI/bump)
