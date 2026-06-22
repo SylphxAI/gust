@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "repo": "SylphxAI/gust",
+    "name": "Gust",
+    "lifecycle": "production",
+    "layer": "foundation",
+    "summary": "Gust is a high-performance HTTP framework for Bun and Node.js with portable app primitives, Rust/WASM routing, native server bindings, middleware, docs, benchmarks, and npm packages.",
+    "goals": [
+      "Own the Gust HTTP framework package family, Rust/WASM routing core, native bindings, middleware, examples, docs, and benchmarks.",
+      "Keep @sylphx/gust, @sylphx/gust-app, @sylphx/gust-server, @sylphx/gust-core, and NAPI platform packages aligned.",
+      "Publish package changes through the central release workflow with native-binding and npm registry proof where relevant."
+    ],
+    "nonGoals": [
+      "Own downstream app domain behavior, deployment policy, or product-specific middleware semantics.",
+      "Make benchmark claims without reproducible benchmark context.",
+      "Treat source revert as complete recovery after npm or native package publication."
+    ]
+  },
+  "boundaries": {
+    "owns": [
+      {
+        "name": "gust-http-framework",
+        "description": "Portable app framework, server/native package, Rust/WASM routing core, middleware, streaming, WebSocket, SSE, and examples."
+      },
+      {
+        "name": "gust-package-release",
+        "description": "Build, test, ADR-29 admission, central release workflow, and native binding package publication."
+      }
+    ],
+    "doesNotOwn": [
+      "Downstream product apps' domain behavior, databases, auth policy, or deployment paths.",
+      "Third-party benchmark environments outside documented benchmark scripts and reports.",
+      "Enterprise doctrine or organization-wide rulesets."
+    ],
+    "publicSurfaces": [
+      {
+        "type": "package-export",
+        "name": "Gust npm package family",
+        "location": "packages/*/package.json, crates/gust-napi/package.json"
+      },
+      {
+        "type": "documentation",
+        "name": "Framework docs",
+        "location": "README.md, packages/*/README.md, website/content/docs/"
+      },
+      {
+        "type": "workflow",
+        "name": "ADR-29 CI and native build workflows",
+        "location": ".github/workflows/"
+      },
+      {
+        "type": "status-context",
+        "name": "Required branch contexts",
+        "location": "risk-classification/pass, trunk-admission/pass"
+      }
+    ],
+    "allowedDependencies": [
+      {
+        "repo": "SylphxAI/doctrine",
+        "surface": "enterprise engineering doctrine",
+        "direction": "downward"
+      },
+      {
+        "repo": "SylphxAI/.github",
+        "surface": "ADR-29 admission action and reusable release workflow",
+        "direction": "downward"
+      }
+    ],
+    "forbiddenCouplings": [
+      "Do not put product-specific application behavior into Gust framework core or middleware.",
+      "Do not publish benchmark claims without keeping benchmark scripts and context reproducible.",
+      "Do not publish npm/native package changes without CI, release workflow evidence, and registry readback."
+    ]
+  },
+  "documentation": {
+    "adr": {
+      "path": "docs/adr/",
+      "status": "planned"
+    },
+    "specs": {
+      "path": "README.md, packages/*/README.md, website/content/docs/",
+      "status": "present"
+    },
+    "catalog": {
+      "path": "PROJECT.md",
+      "status": "present"
+    },
+    "runbooks": {
+      "path": "AGENTS.md",
+      "status": "present"
+    },
+    "generatedReferences": {
+      "path": "packages/*/dist/, crates/gust-napi/npm/",
+      "status": "generated"
+    }
+  },
+  "delivery": {
+    "ciModel": "adr29-admission",
+    "requiredContexts": [
+      "risk-classification/pass",
+      "trunk-admission/pass"
+    ],
+    "deployPath": "Main push runs the central reusable release workflow; NAPI platform publication is delegated to .github/workflows/napi.yml when publish is requested.",
+    "productionProof": "ADR-29 admission, CI fan-in, npm registry readback for changed packages, and native binding artifact/readback proof when NAPI packages change.",
+    "recoveryClass": "forward-fix-only",
+    "packageRelease": {
+      "publishesPackages": true,
+      "ecosystems": [
+        "npm",
+        "native-napi",
+        "changesets"
+      ],
+      "releaseIntent": "Changesets and the central reusable release workflow own package release intent.",
+      "versionPr": "Version PR and changelog changes are produced by the reusable release workflow.",
+      "publisher": "SylphxAI/.github reusable release workflow and the repo-local NAPI publish workflow with inherited secrets.",
+      "requiredContexts": [
+        "risk-classification/pass",
+        "trunk-admission/pass"
+      ],
+      "publishProof": "npm readback for @sylphx/gust packages and native platform packages when published."
+    }
+  },
+  "adoption": {
+    "status": "baseline",
+    "gaps": [
+      {
+        "id": "admission-enforcement",
+        "description": "ADR-29 admission currently runs in observe mode; decide when this repo should enforce admission.",
+        "owner": "SylphxAI/gust",
+        "target": "before full doctrine adoption"
+      },
+      {
+        "id": "native-release-proof",
+        "description": "Native NAPI package publication should record explicit registry readback and artifact provenance for changed platform packages.",
+        "owner": "SylphxAI/gust",
+        "target": "before high-risk native package releases"
+      }
+    ]
+  }
+}
