@@ -220,9 +220,16 @@ jobs:
           cd crates/gust-napi/npm
           for dir in */; do
             if [ -f "$dir/package.json" ]; then
-              echo "Publishing $dir..."
+              echo "Packing and auditing $dir..."
               cd "$dir"
-              npm publish --access public --provenance || true
+              TARBALL=$(npm pack --silent)
+              tar -xOf "$TARBALL" package/package.json > "$RUNNER_TEMP/gust-napi-platform.package.json"
+              if grep -q 'workspace:' "$RUNNER_TEMP/gust-napi-platform.package.json"; then
+                echo "::error::Packed platform package.json still contains workspace: dependencies"
+                cat "$RUNNER_TEMP/gust-napi-platform.package.json"
+                exit 1
+              fi
+              npm publish "$TARBALL" --access public --provenance || true
               cd ..
             fi
           done
@@ -232,6 +239,13 @@ jobs:
       - name: Publish main package
         run: |
           cd crates/gust-napi
-          npm publish --access public --provenance
+          TARBALL=$(npm pack --silent)
+          tar -xOf "$TARBALL" package/package.json > "$RUNNER_TEMP/gust-napi.package.json"
+          if grep -q 'workspace:' "$RUNNER_TEMP/gust-napi.package.json"; then
+            echo "::error::Packed @sylphx/gust-napi package.json still contains workspace: dependencies"
+            cat "$RUNNER_TEMP/gust-napi.package.json"
+            exit 1
+          fi
+          npm publish "$TARBALL" --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

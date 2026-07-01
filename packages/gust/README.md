@@ -287,4 +287,4 @@ MIT
 
 ---
 
-Built with [Sylphx](https://github.com/SylphxAI) | [@sylphx/biome-config](https://github.com/SylphxAI/biome-config) | [@sylphx/bump](https://github.com/SylphxAI/bump)
+Built with [Sylphx](https://github.com/SylphxAI) | [@sylphx/biome-config](https://github.com/SylphxAI/biome-config) | Changesets release automation
