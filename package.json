@@ -1,36 +1,37 @@
 {
-	"name": "gust-monorepo",
-	"description": "High-performance WASM-powered HTTP server framework for Bun",
-	"packageManager": "bun@1.3.3",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/SylphxAI/gust"
-	},
-	"private": true,
-	"workspaces": [
-		"packages/*"
-	],
-	"scripts": {
-		"build:wasm": "cd packages/core && bun run build:wasm",
-		"build:napi": "cd crates/gust-napi && napi build --release --platform --dts index.d.ts --js false",
-		"test:napi": "node -e \"const m = require('./crates/gust-napi/index.js'); console.log('Loaded:', Object.keys(m));\"",
-		"example": "bun run packages/gust/examples/basic.ts",
-		"lint": "biome check .",
-		"format": "biome format --write .",
-		"build": "turbo build",
-		"test": "turbo test",
-		"typecheck": "turbo typecheck"
-	},
-	"devDependencies": {
-		"@biomejs/biome": "^2.3.8",
-		"@napi-rs/cli": "^3.5.0",
-		"@sylphx/biome-config": "^0.4.0",
-		"@sylphx/tsconfig": "^0.3.0",
-		"@types/bun": "latest",
-		"@types/node": "^24.10.1",
-		"lefthook": "^2.0.4",
-		"turbo": "^2.6.1",
-		"typescript": "^5.9.3"
-	},
-	"type": "module"
+  "name": "gust-monorepo",
+  "description": "High-performance WASM-powered HTTP server framework for Bun",
+  "packageManager": "bun@1.3.3",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SylphxAI/gust"
+  },
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build:wasm": "cd packages/core && bun run build:wasm",
+    "build:napi": "cd crates/gust-napi && napi build --release --platform --dts index.d.ts --js false",
+    "test:napi": "node -e \"const m = require('./crates/gust-napi/index.js'); console.log('Loaded:', Object.keys(m));\"",
+    "example": "bun run packages/gust/examples/basic.ts",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "build": "turbo build",
+    "test": "turbo test",
+    "typecheck": "turbo typecheck",
+    "lint:fix": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.8",
+    "@napi-rs/cli": "^3.5.0",
+    "@sylphx/biome-config": "^0.4.0",
+    "@sylphx/tsconfig": "^0.3.0",
+    "@types/bun": "latest",
+    "@types/node": "^24.10.1",
+    "lefthook": "^2.0.4",
+    "turbo": "^2.6.1",
+    "typescript": "^7.0.2"
+  },
+  "type": "module"
 }

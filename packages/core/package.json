@@ -1,43 +1,46 @@
 {
-	"name": "@sylphx/gust-core",
-	"version": "0.1.9",
-	"description": "WASM HTTP parser and Radix Trie router - works in browser and server",
-	"type": "module",
-	"files": [
-		"dist"
-	],
-	"main": "dist/index.js",
-	"module": "dist/index.js",
-	"types": "dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"default": "./dist/index.js"
-		},
-		"./wasm": {
-			"import": "./dist/wasm/gust_wasm.js",
-			"default": "./dist/wasm/gust_wasm.js"
-		}
-	},
-	"scripts": {
-		"build:wasm": "cd ../../crates/gust-wasm && wasm-pack build --target web --release --out-dir ../../packages/core/src/wasm",
-		"build": "bunup && cp -r src/wasm dist/",
-		"prepublishOnly": "bun run build"
-	},
-	"keywords": [
-		"gust",
-		"sylphx",
-		"http",
-		"parser",
-		"router",
-		"wasm",
-		"rust",
-		"radix-trie"
-	],
-	"license": "MIT",
-	"sideEffects": false,
-	"devDependencies": {
-		"bunup": "^0.16.10"
-	}
+  "name": "@sylphx/gust-core",
+  "version": "0.1.9",
+  "description": "WASM HTTP parser and Radix Trie router - works in browser and server",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./wasm": {
+      "import": "./dist/wasm/gust_wasm.js",
+      "default": "./dist/wasm/gust_wasm.js"
+    }
+  },
+  "scripts": {
+    "build:wasm": "cd ../../crates/gust-wasm && wasm-pack build --target web --release --out-dir ../../packages/core/src/wasm",
+    "build": "bunup && cp -r src/wasm dist/",
+    "prepublishOnly": "bun run build",
+    "lint:fix": "biome check --write ."
+  },
+  "keywords": [
+    "gust",
+    "sylphx",
+    "http",
+    "parser",
+    "router",
+    "wasm",
+    "rust",
+    "radix-trie"
+  ],
+  "license": "MIT",
+  "sideEffects": false,
+  "devDependencies": {
+    "bunup": "^0.16.10",
+    "@biomejs/biome": "^2.3.12",
+    "@sylphx/biome-config": "^0.4.1"
+  }
 }
