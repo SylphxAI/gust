@@ -157,9 +157,7 @@ export const serve = async <App = Record<string, never>>(
 			throw new Error('HTTP/2 requires TLS configuration (options.tls)')
 		}
 		if (!isHttp2Available()) {
-			throw new Error(
-				'Native HTTP/2 support is not available in this build of @sylphx/gust-napi.'
-			)
+			throw new Error('Native HTTP/2 support is not available in this build of @sylphx/gust-napi.')
 		}
 	}
 

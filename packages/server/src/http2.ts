@@ -97,7 +97,9 @@ const nativeRequiredError = (): Error => {
 	)
 }
 
-const toResponseData = (response: ServerResponse): { status: number; headers: Record<string, string>; body: string } => {
+const toResponseData = (
+	response: ServerResponse
+): { status: number; headers: Record<string, string>; body: string } => {
 	const headers: Record<string, string> = {}
 	if (response.headers) {
 		for (const key in response.headers) {
@@ -136,9 +138,7 @@ export const serveHttp2 = async (options: Http2Options): Promise<Http2ServerInst
 	}
 
 	if (!isHttp2Available()) {
-		throw new Error(
-			'Native HTTP/2 support is not available in this build of @sylphx/gust-napi.'
-		)
+		throw new Error('Native HTTP/2 support is not available in this build of @sylphx/gust-napi.')
 	}
 
 	const { cert, key, fetch: handler, onError } = options

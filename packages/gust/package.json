@@ -1,54 +1,54 @@
 {
-  "name": "@sylphx/gust",
-  "version": "0.1.13",
-  "description": "High-performance HTTP server framework - stateless app + Rust-powered server",
-  "type": "module",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "scripts": {
-    "example": "bun run examples/basic.ts",
-    "lint": "biome check .",
-    "format": "biome format --write .",
-    "build": "bunup --no-splitting",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "lint:fix": "biome check --write ."
-  },
-  "keywords": [
-    "gust",
-    "sylphx",
-    "http",
-    "server",
-    "web",
-    "fast",
-    "wasm",
-    "napi",
-    "native",
-    "rust",
-    "bun",
-    "framework"
-  ],
-  "license": "MIT",
-  "dependencies": {
-    "@sylphx/gust-app": "workspace:*",
-    "@sylphx/gust-server": "workspace:*"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.3.8",
-    "@sylphx/biome-config": "^0.4.0",
-    "@sylphx/gust-core": "workspace:*",
-    "bunup": "^0.16.10",
-    "lefthook": "^2.0.4"
-  }
+	"name": "@sylphx/gust",
+	"version": "0.1.13",
+	"description": "High-performance HTTP server framework - stateless app + Rust-powered server",
+	"type": "module",
+	"main": "dist/index.js",
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"example": "bun run examples/basic.ts",
+		"lint": "biome check .",
+		"format": "biome format --write .",
+		"build": "bunup --no-splitting",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit",
+		"lint:fix": "biome check --write ."
+	},
+	"keywords": [
+		"gust",
+		"sylphx",
+		"http",
+		"server",
+		"web",
+		"fast",
+		"wasm",
+		"napi",
+		"native",
+		"rust",
+		"bun",
+		"framework"
+	],
+	"license": "MIT",
+	"dependencies": {
+		"@sylphx/gust-app": "workspace:*",
+		"@sylphx/gust-server": "workspace:*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.8",
+		"@sylphx/biome-config": "^0.4.0",
+		"@sylphx/gust-core": "workspace:*",
+		"bunup": "^0.16.10",
+		"lefthook": "^2.0.4"
+	}
 }
