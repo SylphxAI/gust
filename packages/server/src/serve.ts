@@ -1,68 +1,28 @@
 /**
  * Serve - High performance HTTP/HTTPS server
  *
- * Native-first architecture:
- * - Primary: Rust native server via napi-rs (~220k req/s)
- * - Fallback: Node.js net/tls + WASM HTTP parser (edge/serverless)
- *
- * Performance optimizations:
- * - Single socket.write() for buffered responses
- * - Lazy timer creation (only when timeout > 0)
- * - Buffer reuse to minimize allocations
- * - Pre-cached status lines
+ * Native-only architecture:
+ * - Rust native server via @sylphx/gust-napi (gust-core authority)
+ * - No parallel JS/WASM HTTP accept or parse loops in this package
  */
 
-import { createServer, type Server as NetServer, type Socket } from 'node:net'
-import { createServer as createTlsServer, type TLSSocket, type Server as TlsServer } from 'node:tls'
 import {
 	type ContextProvider,
 	createApp,
-	createRawContext,
 	type GustApp,
 	type Middleware,
-	parseHeaders,
 	type RawContext,
 	type Route,
 } from '@sylphx/gust-app'
-import type { Handler, ServerResponse, WasmCore } from '@sylphx/gust-core'
-import { getWasm, initWasm, isStreamingBody, serverError } from '@sylphx/gust-core'
+import type { Handler } from '@sylphx/gust-core'
 import {
+	getNativeLoadError,
+	isHttp2Available,
 	isNativeAvailable,
 	isTlsAvailable,
 	loadNativeBinding,
 	type NativeInvokeHandlerInput,
 } from './native'
-
-// Default keep-alive timeout (5 seconds)
-const DEFAULT_KEEP_ALIVE_TIMEOUT = 5000
-// Default max requests per connection
-const DEFAULT_MAX_REQUESTS = 100
-// Default request timeout (30 seconds)
-const DEFAULT_REQUEST_TIMEOUT = 30000
-// Default header size limit (8KB)
-const DEFAULT_MAX_HEADER_SIZE = 8192
-
-// Pre-cached status lines for common status codes (hot path optimization)
-const STATUS_LINES: Record<number, string> = {
-	200: 'HTTP/1.1 200 OK\r\n',
-	201: 'HTTP/1.1 201 Created\r\n',
-	204: 'HTTP/1.1 204 No Content\r\n',
-	301: 'HTTP/1.1 301 Moved Permanently\r\n',
-	302: 'HTTP/1.1 302 Found\r\n',
-	304: 'HTTP/1.1 304 Not Modified\r\n',
-	400: 'HTTP/1.1 400 Bad Request\r\n',
-	401: 'HTTP/1.1 401 Unauthorized\r\n',
-	403: 'HTTP/1.1 403 Forbidden\r\n',
-	404: 'HTTP/1.1 404 Not Found\r\n',
-	500: 'HTTP/1.1 500 Internal Server Error\r\n',
-}
-
-// Connection header values (avoid string allocation)
-const CONN_KEEP_ALIVE = 'connection: keep-alive\r\n'
-const CONN_CLOSE = 'connection: close\r\n'
-
-// Empty buffer for reuse
-const EMPTY_BUFFER = Buffer.allocUnsafe(0)
 
 export type TlsOptions = {
 	/** TLS certificate (PEM format) */
@@ -74,8 +34,6 @@ export type TlsOptions = {
 	/** Passphrase for encrypted key (optional) */
 	readonly passphrase?: string
 }
-
-// ContextProvider and Middleware imported from @sylphx/gust-app
 
 /**
  * Serve options
@@ -133,6 +91,14 @@ export type Server = {
 	readonly connections: () => number
 }
 
+const nativeRequiredError = (): Error => {
+	const loadError = getNativeLoadError()
+	const detail = loadError ? ` Load error: ${loadError.message}` : ''
+	return new Error(
+		`Native HTTP server (@sylphx/gust-napi) is required. Install the native binding for your platform.${detail}`
+	)
+}
+
 /**
  * Start the HTTP/HTTPS server
  *
@@ -154,10 +120,6 @@ export type Server = {
  * })
  * serve({ app, port: 3000 })
  * ```
- *
- * Architecture:
- * - Primary: Rust native server via napi-rs (~220k req/s) - full feature support
- * - Fallback: Node.js net/tls + WASM HTTP parser (edge/serverless)
  */
 export const serve = async <App = Record<string, never>>(
 	options: ServeOptions<App>
@@ -166,13 +128,10 @@ export const serve = async <App = Record<string, never>>(
 	const hostname = options.hostname ?? '0.0.0.0'
 	const useTls = !!options.tls
 
-	// Get handler from app or create from routes
 	let handler: Handler<RawContext>
 	if (options.app) {
-		// Use pre-built app
 		handler = options.app.handle
 	} else if (options.routes) {
-		// Build app from routes (backward compatible)
 		const app = createApp({
 			routes: options.routes,
 			middleware: options.middleware,
@@ -183,22 +142,28 @@ export const serve = async <App = Record<string, never>>(
 		throw new Error('Either app or routes must be provided')
 	}
 
-	// Try native server first (supports both HTTP and HTTPS)
-	if (isNativeAvailable()) {
-		// For TLS, check if native TLS is available
-		if (useTls && !isTlsAvailable()) {
-			// Native doesn't have TLS support compiled in, use JS fallback
-			return serveJs(options, handler, port, hostname, useTls)
-		}
+	if (!isNativeAvailable()) {
+		throw nativeRequiredError()
+	}
 
-		const nativeServer = await serveNative(options, handler, port, hostname, useTls)
-		if (nativeServer) {
-			return nativeServer
+	if (useTls && !isTlsAvailable()) {
+		throw new Error(
+			'Native TLS support is not available in this build of @sylphx/gust-napi. Rebuild with the tls feature enabled.'
+		)
+	}
+
+	if (options.http2) {
+		if (!useTls) {
+			throw new Error('HTTP/2 requires TLS configuration (options.tls)')
+		}
+		if (!isHttp2Available()) {
+			throw new Error(
+				'Native HTTP/2 support is not available in this build of @sylphx/gust-napi.'
+			)
 		}
 	}
 
-	// Fallback to pure JS
-	return serveJs(options, handler, port, hostname, useTls)
+	return serveNative(options, handler, port, hostname, useTls)
 }
 
 /**
@@ -209,11 +174,6 @@ export const serve = async <App = Record<string, never>>(
  * - JS handler is called via threadsafe callback for dynamic routes
  * - Middleware (CORS, rate limiting, security) runs in Rust
  * - Supports TLS/HTTPS when compiled with 'tls' feature
- *
- * NEW: Route Registration Pattern (when GustApp is provided)
- * - Routes are registered in Rust Radix Trie router
- * - Rust routes first, only calls JS for matched routes
- * - Uses invokeHandler(handlerId, ctx) for minimal JS overhead
  */
 const serveNative = async <App>(
 	options: ServeOptions<App>,
@@ -221,14 +181,15 @@ const serveNative = async <App>(
 	port: number,
 	hostname: string,
 	useTls: boolean
-): Promise<Server | null> => {
+): Promise<Server> => {
 	const binding = loadNativeBinding()
-	if (!binding) return null
+	if (!binding) {
+		throw nativeRequiredError()
+	}
+
+	const server = new binding.GustServer()
 
 	try {
-		const server = new binding.GustServer()
-
-		// Enable TLS if configured
 		if (useTls && options.tls) {
 			const tlsConfig: {
 				certPath?: string
@@ -237,7 +198,6 @@ const serveNative = async <App>(
 				key?: string
 			} = {}
 
-			// Convert cert/key to string if Buffer
 			if (typeof options.tls.cert === 'string') {
 				tlsConfig.cert = options.tls.cert
 			} else if (Buffer.isBuffer(options.tls.cert)) {
@@ -252,13 +212,11 @@ const serveNative = async <App>(
 
 			await server.enableTls(tlsConfig)
 
-			// Enable HTTP/2 if requested (only with TLS)
 			if (options.http2) {
 				await server.enableHttp2()
 			}
 		}
 
-		// Apply timeout and limit configurations
 		if (options.requestTimeout !== undefined) {
 			await server.setRequestTimeout(options.requestTimeout)
 		}
@@ -272,10 +230,7 @@ const serveNative = async <App>(
 			await server.setMaxHeaderSize(options.maxHeaderSize)
 		}
 
-		// NEW: Route Registration Pattern (when GustApp is provided)
-		// This enables Rust-side routing with minimal JS overhead
 		if (options.app) {
-			// Convert manifest to native format (napi-rs uses camelCase)
 			const nativeManifest = {
 				routes: options.app.manifest.routes.map((r) => ({
 					method: r.method,
@@ -287,18 +242,13 @@ const serveNative = async <App>(
 				handlerCount: options.app.manifest.handlerCount,
 			}
 
-			// Register routes in Rust router
 			await server.registerRoutes(nativeManifest)
 
-			// Set invoke handler callback
-			// Rust will call this with (input: { handlerId, ctx }) for matched routes
-			// Note: napi-rs auto-converts snake_case to camelCase
 			server.setInvokeHandler(async (input: NativeInvokeHandlerInput) => {
 				try {
 					// biome-ignore lint/style/noNonNullAssertion: app is checked above
 					const response = await options.app!.invokeHandler(input.handlerId, input.ctx)
 
-					// Convert ServerResponse to native format
 					const headers: Record<string, string> = {}
 					if (response.headers) {
 						for (const key in response.headers) {
@@ -330,14 +280,10 @@ const serveNative = async <App>(
 				}
 			})
 		} else {
-			// Legacy: Set fallback handler that routes all requests to JS handler
-			// This is the native-first architecture: Rust handles HTTP, JS handles business logic
 			server.setFallback(async (ctx) => {
 				try {
-					// Parse body if present
 					const bodyBuffer = ctx.body ? Buffer.from(ctx.body) : Buffer.alloc(0)
 
-					// Create raw context for the handler
 					const rawCtx: RawContext = {
 						method: ctx.method,
 						path: ctx.path,
@@ -353,12 +299,11 @@ const serveNative = async <App>(
 							}
 						},
 						raw: bodyBuffer,
-						socket: null, // Not available for native
+						socket: null,
 					}
 
 					const response = await handler(rawCtx)
 
-					// Convert ServerResponse to native format
 					const headers: Record<string, string> = {}
 					if (response.headers) {
 						for (const key in response.headers) {
@@ -391,7 +336,6 @@ const serveNative = async <App>(
 			})
 		}
 
-		// Start server - awaits until bind completes, then spawns accept loop
 		await server.serveWithHostname(port, hostname)
 
 		options.onListen?.({ port, hostname, tls: useTls })
@@ -410,382 +354,6 @@ const serveNative = async <App>(
 		}
 	} catch (err) {
 		options.onError?.(err as Error)
-		return null
-	}
-}
-
-/**
- * Pure JS server implementation using node:net + WASM HTTP parser
- */
-const serveJs = async <App>(
-	options: ServeOptions<App>,
-	handler: Handler<RawContext>,
-	port: number,
-	hostname: string,
-	useTls: boolean
-): Promise<Server> => {
-	// Initialize WASM
-	await initWasm()
-	const wasm = getWasm()
-	const keepAliveTimeout = options.keepAliveTimeout ?? DEFAULT_KEEP_ALIVE_TIMEOUT
-	const maxRequests = options.maxRequestsPerConnection ?? DEFAULT_MAX_REQUESTS
-	const requestTimeout = options.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT
-	const maxHeaderSize = options.maxHeaderSize ?? DEFAULT_MAX_HEADER_SIZE
-
-	// Track active connections for graceful shutdown
-	const activeConnections = new Set<Socket | TLSSocket>()
-	let isShuttingDown = false
-
-	const connectionConfig: ConnectionConfig = {
-		keepAliveTimeout,
-		maxRequests,
-		requestTimeout,
-		maxHeaderSize,
-		onError: options.onError,
-	}
-
-	return new Promise((resolve, reject) => {
-		// Create server (HTTP or HTTPS)
-		const server: NetServer | TlsServer = useTls
-			? createTlsServer(
-					{
-						cert: options.tls?.cert,
-						key: options.tls?.key,
-						ca: options.tls?.ca,
-						passphrase: options.tls?.passphrase,
-					},
-					(socket: TLSSocket) => {
-						if (isShuttingDown) {
-							socket.end()
-							return
-						}
-						activeConnections.add(socket)
-						socket.on('close', () => activeConnections.delete(socket))
-						handleConnection(socket, handler, wasm, connectionConfig)
-					}
-				)
-			: createServer((socket: Socket) => {
-					if (isShuttingDown) {
-						socket.end()
-						return
-					}
-					activeConnections.add(socket)
-					socket.on('close', () => activeConnections.delete(socket))
-					handleConnection(socket, handler, wasm, connectionConfig)
-				})
-
-		server.on('error', reject)
-
-		server.listen(port, hostname, () => {
-			const serverInfo: Server = {
-				port,
-				hostname,
-				tls: useTls,
-				connections: () => activeConnections.size,
-				stop: () =>
-					new Promise((res) => {
-						// Force close all connections
-						for (const socket of activeConnections) {
-							socket.destroy()
-						}
-						activeConnections.clear()
-						server.close(() => res())
-					}),
-				shutdown: (timeout = 30000) =>
-					new Promise((res) => {
-						isShuttingDown = true
-
-						// Stop accepting new connections
-						server.close(() => {
-							res()
-						})
-
-						// Wait for existing connections to finish
-						const checkInterval = setInterval(() => {
-							if (activeConnections.size === 0) {
-								clearInterval(checkInterval)
-								res()
-							}
-						}, 100)
-
-						// Force close after timeout
-						setTimeout(() => {
-							clearInterval(checkInterval)
-							for (const socket of activeConnections) {
-								socket.destroy()
-							}
-							activeConnections.clear()
-							res()
-						}, timeout)
-					}),
-			}
-
-			options.onListen?.({ port, hostname, tls: useTls })
-			resolve(serverInfo)
-		})
-	})
-}
-
-/**
- * Connection config
- */
-type ConnectionConfig = {
-	keepAliveTimeout: number
-	maxRequests: number
-	requestTimeout: number
-	maxHeaderSize: number
-	onError?: (error: Error) => void
-}
-
-/**
- * Connection state for keep-alive
- */
-type ConnectionState = {
-	buffer: Buffer
-	requestCount: number
-	idleTimer: ReturnType<typeof setTimeout> | null
-	requestTimer: ReturnType<typeof setTimeout> | null
-	isProcessing: boolean
-}
-
-/**
- * Handle incoming TCP/TLS connection with keep-alive support
- */
-const handleConnection = (
-	socket: Socket | TLSSocket,
-	handler: Handler<RawContext>,
-	wasm: WasmCore,
-	config: ConnectionConfig
-): void => {
-	const state: ConnectionState = {
-		buffer: EMPTY_BUFFER,
-		requestCount: 0,
-		idleTimer: null,
-		requestTimer: null,
-		isProcessing: false,
-	}
-
-	// Lazy idle timer - only create if timeout > 0
-	const resetIdleTimer =
-		config.keepAliveTimeout > 0
-			? () => {
-					if (state.idleTimer) clearTimeout(state.idleTimer)
-					state.idleTimer = setTimeout(() => socket.end(), config.keepAliveTimeout)
-				}
-			: () => {} // no-op if timeout disabled
-
-	// Clear all timers
-	const clearTimers = () => {
-		if (state.idleTimer) {
-			clearTimeout(state.idleTimer)
-			state.idleTimer = null
-		}
-		if (state.requestTimer) {
-			clearTimeout(state.requestTimer)
-			state.requestTimer = null
-		}
-	}
-
-	// Lazy request timeout - only create if timeout > 0
-	const startRequestTimeout =
-		config.requestTimeout > 0
-			? () => {
-					if (state.requestTimer) clearTimeout(state.requestTimer)
-					state.requestTimer = setTimeout(() => {
-						if (state.isProcessing) {
-							clearTimers()
-							socket.write('HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n')
-							socket.end()
-						}
-					}, config.requestTimeout)
-				}
-			: () => {} // no-op if timeout disabled
-
-	const clearRequestTimeout = () => {
-		if (state.requestTimer) {
-			clearTimeout(state.requestTimer)
-			state.requestTimer = null
-		}
-	}
-
-	// Start idle timer
-	resetIdleTimer()
-
-	socket.on('data', async (chunk: Buffer) => {
-		// Reset idle timer on data
-		resetIdleTimer()
-
-		// Optimization: avoid Buffer.concat when buffer is empty
-		state.buffer = state.buffer.length === 0 ? chunk : Buffer.concat([state.buffer, chunk])
-
-		// Check header size limit (before complete parse)
-		const headerEnd = state.buffer.indexOf('\r\n\r\n')
-		if (headerEnd === -1 && state.buffer.length > config.maxHeaderSize) {
-			clearTimers()
-			socket.write('HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\n\r\n')
-			socket.end()
-			return
-		}
-
-		// Process all complete requests in buffer (pipelining support)
-		while (state.buffer.length > 0) {
-			// Try to parse HTTP request
-			const parsed = wasm.parse_http(new Uint8Array(state.buffer))
-
-			if (parsed.state === 0) {
-				// Incomplete - wait for more data
-				parsed.free()
-				return
-			}
-
-			if (parsed.state === 2) {
-				// Parse error
-				parsed.free()
-				clearTimers()
-				socket.write('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n')
-				socket.end()
-				return
-			}
-
-			// Complete - process request
-			state.requestCount++
-			state.isProcessing = true
-			startRequestTimeout()
-			const requestBuffer = state.buffer
-
-			try {
-				const headers = parseHeaders(requestBuffer, parsed.header_offsets, parsed.headers_count)
-				const ctx = createRawContext(socket, requestBuffer, parsed, headers)
-
-				// Determine if keep-alive
-				const connectionHeader = headers.connection?.toLowerCase() || ''
-				const keepAlive = connectionHeader !== 'close' // HTTP/1.1 default is keep-alive
-
-				// Check if we should close after this request
-				const shouldClose = !keepAlive || state.requestCount >= config.maxRequests
-
-				// Calculate body end position for buffer slicing
-				const requestEnd =
-					parsed.body_start +
-					(headers['content-length'] ? parseInt(headers['content-length'], 10) : 0)
-
-				parsed.free()
-
-				const response = await handler(ctx)
-				clearRequestTimeout()
-				state.isProcessing = false
-				sendResponse(socket, response, shouldClose)
-
-				if (shouldClose) {
-					clearTimers()
-					socket.end()
-					return
-				}
-
-				// Remove processed request from buffer
-				state.buffer =
-					state.buffer.length > requestEnd ? state.buffer.subarray(requestEnd) : EMPTY_BUFFER
-			} catch (error) {
-				config.onError?.(error as Error)
-				clearTimers()
-				sendResponse(socket, serverError(), true)
-				socket.end()
-				return
-			}
-		}
-	})
-
-	socket.on('close', clearTimers)
-	socket.on('error', (err) => {
-		clearTimers()
-		config.onError?.(err)
-	})
-}
-
-/**
- * Send HTTP response with optional keep-alive
- * Optimized for single write when possible
- */
-const sendResponse = (
-	socket: Socket | TLSSocket,
-	response: ServerResponse,
-	shouldClose: boolean
-): void => {
-	// Check if body is streaming (AsyncIterable)
-	if (isStreamingBody(response.body)) {
-		sendStreamingResponse(socket, response, shouldClose)
-		return
-	}
-
-	// Buffered response - build complete response and send in single write
-	const statusLine = STATUS_LINES[response.status] || `HTTP/1.1 ${response.status} Unknown\r\n`
-	const connHeader = shouldClose ? CONN_CLOSE : CONN_KEEP_ALIVE
-	const body = response.body
-	const bodyLen = body !== null ? Buffer.byteLength(body) : 0
-
-	// Build headers string
-	let headers = statusLine
-	for (const key in response.headers) {
-		headers += `${key}: ${response.headers[key]}\r\n`
-	}
-	headers += `content-length: ${bodyLen}\r\n`
-	headers += connHeader
-	headers += '\r\n'
-
-	// Single write: headers + body combined
-	if (body !== null && bodyLen > 0) {
-		const headerBuf = Buffer.from(headers)
-		const bodyBuf = typeof body === 'string' ? Buffer.from(body) : body
-		socket.write(Buffer.concat([headerBuf, bodyBuf]))
-	} else {
-		socket.write(headers)
-	}
-}
-
-/**
- * Send streaming response with chunked transfer encoding
- */
-const sendStreamingResponse = async (
-	socket: Socket | TLSSocket,
-	response: ServerResponse,
-	shouldClose: boolean
-): Promise<void> => {
-	const statusLine = STATUS_LINES[response.status] || `HTTP/1.1 ${response.status} Unknown\r\n`
-	const connHeader = shouldClose ? CONN_CLOSE : CONN_KEEP_ALIVE
-
-	let headers = statusLine
-	for (const key in response.headers) {
-		headers += `${key}: ${response.headers[key]}\r\n`
-	}
-	headers += 'transfer-encoding: chunked\r\n'
-	headers += connHeader
-	headers += '\r\n'
-
-	socket.write(headers)
-
-	// Stream chunks with backpressure handling
-	try {
-		for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
-			if (!socket.writable) break
-
-			// Combine chunk header + data + trailer into single write
-			const sizeHex = chunk.length.toString(16)
-			const chunkBuf = Buffer.allocUnsafe(sizeHex.length + 2 + chunk.length + 2)
-			chunkBuf.write(sizeHex, 0)
-			chunkBuf.write('\r\n', sizeHex.length)
-			chunkBuf.set(chunk, sizeHex.length + 2)
-			chunkBuf.write('\r\n', sizeHex.length + 2 + chunk.length)
-
-			const canWrite = socket.write(chunkBuf)
-			if (!canWrite) {
-				await new Promise<void>((resolve) => socket.once('drain', resolve))
-			}
-		}
-
-		// Send terminating chunk
-		socket.write('0\r\n\r\n')
-	} catch {
-		// Stream error - close connection
-		socket.destroy()
+		throw err instanceof Error ? err : new Error(String(err))
 	}
 }
