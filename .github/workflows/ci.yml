@@ -25,7 +25,7 @@ jobs:
           policy-mode: observe
 
   ci:
-    runs-on: [self-hosted, sylphx, linux, standard]
+    runs-on: [self-hosted, sylphx-linux-standard]
     steps:
       - uses: actions/checkout@v4
 
