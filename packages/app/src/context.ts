@@ -295,7 +295,7 @@ export const serverResponseToResponse = (
 		}
 	}
 
-	return new Response(body, {
+	return new Response(body as BodyInit | null, {
 		status: response.status,
 		headers,
 	})

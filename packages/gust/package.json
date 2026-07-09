@@ -22,7 +22,8 @@
 		"format": "biome format --write .",
 		"build": "bunup --no-splitting",
 		"test": "bun test",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"lint:fix": "biome check --write ."
 	},
 	"keywords": [
 		"gust",

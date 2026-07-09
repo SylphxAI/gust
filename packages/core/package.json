@@ -23,7 +23,8 @@
 	"scripts": {
 		"build:wasm": "cd ../../crates/gust-wasm && wasm-pack build --target web --release --out-dir ../../packages/core/src/wasm",
 		"build": "bunup && cp -r src/wasm dist/",
-		"prepublishOnly": "bun run build"
+		"prepublishOnly": "bun run build",
+		"lint:fix": "biome check --write ."
 	},
 	"keywords": [
 		"gust",
@@ -38,6 +39,8 @@
 	"license": "MIT",
 	"sideEffects": false,
 	"devDependencies": {
-		"bunup": "^0.16.10"
+		"bunup": "^0.16.10",
+		"@biomejs/biome": "^2.3.12",
+		"@sylphx/biome-config": "^0.4.1"
 	}
 }

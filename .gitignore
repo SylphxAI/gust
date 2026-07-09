@@ -38,3 +38,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 target/
 *.node
 !crates/gust-napi/*.node
+*.node

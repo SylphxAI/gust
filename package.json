@@ -19,7 +19,8 @@
 		"format": "biome format --write .",
 		"build": "turbo build",
 		"test": "turbo test",
-		"typecheck": "turbo typecheck"
+		"typecheck": "turbo typecheck",
+		"lint:fix": "biome check --write ."
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.8",
@@ -30,7 +31,7 @@
 		"@types/node": "^24.10.1",
 		"lefthook": "^2.0.4",
 		"turbo": "^2.6.1",
-		"typescript": "^5.9.3"
+		"typescript": "^7.0.2"
 	},
 	"type": "module"
 }

@@ -1,33 +1,36 @@
 /**
  * HTTP/2 Server
- * High-performance HTTP/2 with multiplexing and server push
+ *
+ * Native-only: delegates to GustServer (enableTls + enableHttp2).
+ * Helpers for push hints and ALPN remain available without parallel Node servers.
  */
 
-import {
-	constants,
-	createServer as createH2Server,
-	createSecureServer,
-	type Http2SecureServer,
-	type Http2Server,
-	type IncomingHttpHeaders,
-	type ServerHttp2Stream,
-} from 'node:http2'
 import type { Handler, ServerResponse } from '@sylphx/gust-core'
-import { serverError } from '@sylphx/gust-core'
-
-const {
-	HTTP2_HEADER_METHOD,
-	HTTP2_HEADER_PATH,
-	HTTP2_HEADER_SCHEME,
-	HTTP2_HEADER_AUTHORITY,
-	HTTP2_HEADER_STATUS,
-	HTTP2_HEADER_CONTENT_TYPE,
-	HTTP2_HEADER_CONTENT_LENGTH,
-} = constants
+import {
+	getNativeLoadError,
+	isHttp2Available,
+	isNativeAvailable,
+	isTlsAvailable,
+	loadNativeBinding,
+} from './native'
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/** Minimal HTTP/2 stream surface for push helpers (native does not expose streams to JS). */
+export type Http2Stream = {
+	readonly pushAllowed?: boolean
+	readonly destroyed?: boolean
+	readonly closed?: boolean
+	pushStream?(
+		headers: Record<string, string | number>,
+		callback: (err: Error | null, pushStream: Http2Stream | null) => void
+	): void
+	respond?(headers: Record<string, string | number>): void
+	write?(chunk: Uint8Array | Buffer | string): void
+	end?(data?: Uint8Array | Buffer | string): void
+}
 
 export type Http2Context = {
 	/** HTTP method */
@@ -40,8 +43,8 @@ export type Http2Context = {
 	readonly headers: Record<string, string>
 	/** Request body */
 	readonly body: Buffer
-	/** HTTP/2 stream */
-	readonly stream: ServerHttp2Stream
+	/** HTTP/2 stream (null when served via native FFI — push not available from JS) */
+	readonly stream: Http2Stream | null
 	/** Authority (host) */
 	readonly authority: string
 	/** Scheme (https) */
@@ -80,202 +83,142 @@ export type Http2ServerInstance = {
 	readonly hostname: string
 	readonly stop: () => Promise<void>
 	readonly push: (
-		stream: ServerHttp2Stream,
+		stream: Http2Stream,
 		path: string,
 		headers?: Record<string, string>
-	) => ServerHttp2Stream | null
+	) => Http2Stream | null
 }
 
-// ============================================================================
-// HTTP/2 Server
-// ============================================================================
+const nativeRequiredError = (): Error => {
+	const loadError = getNativeLoadError()
+	const detail = loadError ? ` Load error: ${loadError.message}` : ''
+	return new Error(
+		`Native HTTP/2 server (@sylphx/gust-napi) is required. Install the native binding for your platform.${detail}`
+	)
+}
 
-/**
- * Create HTTP/2 context from stream
- */
-const createHttp2Context = async (
-	stream: ServerHttp2Stream,
-	headers: IncomingHttpHeaders
-): Promise<Http2Context> => {
-	const method = (headers[HTTP2_HEADER_METHOD] as string) || 'GET'
-	const fullPath = (headers[HTTP2_HEADER_PATH] as string) || '/'
-	const authority = (headers[HTTP2_HEADER_AUTHORITY] as string) || ''
-	const scheme = (headers[HTTP2_HEADER_SCHEME] as string) || 'https'
-
-	// Parse path and query
-	const queryIdx = fullPath.indexOf('?')
-	const path = queryIdx >= 0 ? fullPath.slice(0, queryIdx) : fullPath
-	const query = queryIdx >= 0 ? fullPath.slice(queryIdx) : ''
-
-	// Convert headers to flat object
-	const headerMap: Record<string, string> = {}
-	for (const [key, value] of Object.entries(headers)) {
-		if (!key.startsWith(':') && value !== undefined) {
-			headerMap[key] = Array.isArray(value) ? value.join(', ') : value
+const toResponseData = (
+	response: ServerResponse
+): { status: number; headers: Record<string, string>; body: string } => {
+	const headers: Record<string, string> = {}
+	if (response.headers) {
+		for (const key in response.headers) {
+			headers[key] = String(response.headers[key])
 		}
 	}
 
-	// Read body
-	const chunks: Buffer[] = []
-	for await (const chunk of stream) {
-		chunks.push(chunk)
-	}
-	const body = Buffer.concat(chunks)
+	const body =
+		response.body === null
+			? ''
+			: typeof response.body === 'string'
+				? response.body
+				: Buffer.isBuffer(response.body)
+					? response.body.toString()
+					: String(response.body)
 
 	return {
-		method,
-		path,
-		query,
-		headers: headerMap,
+		status: response.status,
+		headers,
 		body,
-		stream,
-		authority,
-		scheme,
 	}
 }
 
 /**
- * Send HTTP/2 response
- * Supports both buffered and streaming (AsyncIterable) bodies
- */
-const sendResponse = async (stream: ServerHttp2Stream, response: ServerResponse): Promise<void> => {
-	if (stream.destroyed || stream.closed) return
-
-	const headers: Record<string, string | number> = {
-		[HTTP2_HEADER_STATUS]: response.status,
-	}
-
-	// Add response headers
-	for (const [key, value] of Object.entries(response.headers)) {
-		headers[key.toLowerCase()] = value
-	}
-
-	// Check if body is streaming (AsyncIterable)
-	const isStreaming =
-		response.body !== null &&
-		typeof response.body === 'object' &&
-		Symbol.asyncIterator in response.body
-
-	if (isStreaming) {
-		// Streaming response - no content-length
-		stream.respond(headers)
-
-		try {
-			for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
-				if (stream.destroyed || stream.closed) break
-				stream.write(chunk)
-			}
-		} catch {
-			// Stream error
-		} finally {
-			stream.end()
-		}
-	} else {
-		// Buffered response - add content-length
-		if (response.body !== null) {
-			const body = response.body as string | Buffer
-			const bodyLen = typeof body === 'string' ? Buffer.byteLength(body) : body.length
-			headers[HTTP2_HEADER_CONTENT_LENGTH] = bodyLen
-		}
-
-		stream.respond(headers)
-
-		if (response.body !== null) {
-			stream.end(response.body as string | Buffer)
-		} else {
-			stream.end()
-		}
-	}
-}
-
-/**
- * Start HTTP/2 server (secure)
+ * Start HTTP/2 server via native GustServer (TLS + HTTP/2).
  */
 export const serveHttp2 = async (options: Http2Options): Promise<Http2ServerInstance> => {
-	const {
-		port = options.cert ? 443 : 8443,
-		hostname = '0.0.0.0',
-		fetch: handler,
-		cert,
-		key,
-		allowHttp1 = true,
-		onError,
-		maxConcurrentStreams = 100,
-		initialWindowSize = 65535,
-		maxHeaderListSize = 16384,
-	} = options
-
-	const serverOptions = {
-		allowHTTP1: allowHttp1,
-		settings: {
-			maxConcurrentStreams,
-			initialWindowSize,
-			maxHeaderListSize,
-		},
+	if (!isNativeAvailable()) {
+		throw nativeRequiredError()
 	}
 
-	let server: Http2SecureServer | Http2Server
-
-	if (cert && key) {
-		// Secure HTTP/2 server
-		server = createSecureServer({
-			...serverOptions,
-			cert: typeof cert === 'string' ? cert : cert,
-			key: typeof key === 'string' ? key : key,
-		})
-	} else {
-		// Plain HTTP/2 (h2c) - not recommended for production
-		server = createH2Server(serverOptions)
+	if (!isTlsAvailable()) {
+		throw new Error(
+			'Native TLS support is not available in this build of @sylphx/gust-napi. HTTP/2 requires TLS.'
+		)
 	}
 
-	// Handle streams
-	server.on('stream', async (stream: ServerHttp2Stream, headers: IncomingHttpHeaders) => {
-		try {
-			const ctx = await createHttp2Context(stream, headers)
-			const response = await handler(ctx)
-			sendResponse(stream, response)
-		} catch (error) {
-			onError?.(error as Error)
-			sendResponse(stream, serverError())
+	if (!isHttp2Available()) {
+		throw new Error('Native HTTP/2 support is not available in this build of @sylphx/gust-napi.')
+	}
+
+	const { cert, key, fetch: handler, onError } = options
+
+	if (!cert || !key) {
+		throw new Error('HTTP/2 server requires TLS certificate and key (cert, key)')
+	}
+
+	const binding = loadNativeBinding()
+	if (!binding) {
+		throw nativeRequiredError()
+	}
+
+	const port = options.port ?? 443
+	const hostname = options.hostname ?? '0.0.0.0'
+
+	const server = new binding.GustServer()
+
+	try {
+		const tlsConfig: { cert?: string; key?: string } = {}
+
+		if (typeof cert === 'string') {
+			tlsConfig.cert = cert
+		} else if (Buffer.isBuffer(cert)) {
+			tlsConfig.cert = cert.toString('utf-8')
 		}
-	})
 
-	// Handle errors
-	server.on('error', (err) => {
-		onError?.(err)
-	})
+		if (typeof key === 'string') {
+			tlsConfig.key = key
+		} else if (Buffer.isBuffer(key)) {
+			tlsConfig.key = key.toString('utf-8')
+		}
 
-	return new Promise((resolve, reject) => {
-		server.on('error', reject)
+		await server.enableTls(tlsConfig)
+		await server.enableHttp2()
 
-		server.listen(port, hostname, () => {
-			options.onListen?.({ port, hostname })
+		server.setFallback(async (ctx) => {
+			try {
+				const bodyBuffer = ctx.body ? Buffer.from(ctx.body) : Buffer.alloc(0)
+				const authority = ctx.headers.host ?? ctx.headers[':authority'] ?? ''
 
-			resolve({
-				port,
-				hostname,
-				stop: () => new Promise((res) => server.close(() => res())),
-				push: (stream, path, headers = {}) => {
-					if (!stream.pushAllowed) return null
+				const http2Ctx: Http2Context = {
+					method: ctx.method,
+					path: ctx.path,
+					query: ctx.query ?? '',
+					headers: ctx.headers,
+					body: bodyBuffer,
+					stream: null,
+					authority,
+					scheme: 'https',
+					params: ctx.params,
+				}
 
-					let pushStream: ServerHttp2Stream | null = null
-
-					stream.pushStream(
-						{
-							[HTTP2_HEADER_PATH]: path,
-							...headers,
-						},
-						(err, ps) => {
-							if (err) return
-							pushStream = ps
-						}
-					)
-
-					return pushStream
-				},
-			})
+				const response = await handler(http2Ctx)
+				return toResponseData(response)
+			} catch (err) {
+				onError?.(err as Error)
+				return {
+					status: 500,
+					headers: { 'content-type': 'text/plain' },
+					body: 'Internal Server Error',
+				}
+			}
 		})
-	})
+
+		await server.serveWithHostname(port, hostname)
+		options.onListen?.({ port, hostname })
+
+		return {
+			port,
+			hostname,
+			stop: async () => {
+				await server.shutdown()
+			},
+			push: () => null,
+		}
+	} catch (err) {
+		onError?.(err as Error)
+		throw err instanceof Error ? err : new Error(String(err))
+	}
 }
 
 // ============================================================================
@@ -292,54 +235,27 @@ export type PushOptions = {
 }
 
 /**
- * Push a resource to the client
+ * Push a resource to the client.
+ * Requires an HTTP/2 stream handle; not available when serving via native FFI.
  */
 export const pushResource = (
-	stream: ServerHttp2Stream,
-	path: string,
-	content: string | Buffer,
-	options: PushOptions = {}
+	stream: Http2Stream,
+	_path: string,
+	_content: string | Buffer,
+	_options: PushOptions = {}
 ): boolean => {
-	if (!stream.pushAllowed) return false
-
-	const { contentType = 'application/octet-stream', cacheControl, headers = {} } = options
-
-	try {
-		stream.pushStream(
-			{
-				[HTTP2_HEADER_PATH]: path,
-			},
-			(err, pushStream) => {
-				if (err || !pushStream) return
-
-				const responseHeaders: Record<string, string | number> = {
-					[HTTP2_HEADER_STATUS]: 200,
-					[HTTP2_HEADER_CONTENT_TYPE]: contentType,
-					[HTTP2_HEADER_CONTENT_LENGTH]:
-						typeof content === 'string' ? Buffer.byteLength(content) : content.length,
-					...headers,
-				}
-
-				if (cacheControl) {
-					responseHeaders['cache-control'] = cacheControl
-				}
-
-				pushStream.respond(responseHeaders)
-				pushStream.end(content)
-			}
-		)
-
-		return true
-	} catch {
+	if (!stream.pushAllowed || !stream.pushStream) {
 		return false
 	}
+
+	return false
 }
 
 /**
- * Push multiple resources
+ * Push multiple resources.
  */
 export const pushResources = (
-	stream: ServerHttp2Stream,
+	stream: Http2Stream,
 	resources: Array<{ path: string; content: string | Buffer; options?: PushOptions }>
 ): number => {
 	let pushed = 0
