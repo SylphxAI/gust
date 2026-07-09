@@ -87,7 +87,10 @@ export const fetchHandler = <App = Record<string, never>>(
 			const request = new Request(url, {
 				method: ctx.method,
 				headers: ctx.headers,
-				body: ctx.method !== 'GET' && ctx.method !== 'HEAD' ? ctx.body : undefined,
+				body:
+					ctx.method !== 'GET' && ctx.method !== 'HEAD'
+						? (ctx.body as BodyInit | undefined)
+						: undefined,
 			})
 			return handler(request) as unknown as ServerResponse
 		}

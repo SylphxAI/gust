@@ -3,7 +3,8 @@
 	"compilerOptions": {
 		"skipLibCheck": true,
 		"noEmit": true,
-		"types": ["bun"]
+		"types": ["bun", "node"],
+		"lib": ["ES2022", "DOM"]
 	},
 	"include": ["packages/*/src/**/*.ts"],
 	"exclude": ["node_modules", "**/dist", "**/tests"]
