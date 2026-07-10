@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Rust-First gate: packages/server must not implement parallel HTTP server logic.
 # Allowed: FFI bridge to @sylphx/gust-napi / gust-wasm (native.ts, type re-exports).
-# Forbidden: in-process HTTP/1.1 or HTTP/2 servers, WASM HTTP parse loops, socket accept loops.
+# Forbidden: in-process HTTP/1.1 or HTTP/2 servers, WASM HTTP parse loops, socket accept loops,
+#            Bun.serve wrappers (turboServe), and public turboServe export.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,6 +14,8 @@ if [[ ! -d "${SERVER_SRC}" ]]; then
 fi
 
 # Files that may contain only FFI bridge / handler helpers (no socket servers).
+# turbo.ts is allowlisted for turboRouter/turboJson helpers only — Bun.serve/turboServe
+# are still forbidden via the global hot-path scan below.
 ALLOWED=(
   native.ts
   index.ts
@@ -82,10 +85,30 @@ scan_file() {
   fi
 }
 
+# Global hot-path bans — apply even to allowlisted files.
+# Match code (export/const/call), not documentation comments.
+scan_hot_path_bans() {
+  local file="$1"
+  local base
+  base="$(basename "${file}")"
+  # Strip // and /* */ comments before matching so docs can name the ban.
+  local code
+  code="$(sed -E 's|//.*$||g; s|/\*.*\*/||g' "${file}")"
+
+  if printf '%s\n' "${code}" | grep -qE '(export[[:space:]]+\{[^}]*\bturboServe\b|export[[:space:]]+(const|function|async function)[[:space:]]+turboServe\b|const[[:space:]]+turboServe[[:space:]]*=)'; then
+    report_violation "${base}" "turboServe" "public/parallel Bun HTTP serve bypass of gust-core native authority"
+  fi
+
+  if printf '%s\n' "${code}" | grep -qE '\bBun\.serve\s*\('; then
+    report_violation "${base}" "Bun.serve" "parallel in-process HTTP server (must use serve() → gust-napi)"
+  fi
+}
+
 echo "check-no-ts-backend: scanning ${SERVER_SRC}"
 for ts_file in "${SERVER_SRC}"/*.ts; do
   [[ -f "${ts_file}" ]] || continue
   scan_file "${ts_file}"
+  scan_hot_path_bans "${ts_file}"
 done
 
 if [[ "${violations}" -gt 0 ]]; then

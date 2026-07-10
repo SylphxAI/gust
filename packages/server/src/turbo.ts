@@ -1,14 +1,13 @@
 /**
- * Turbo Server - Zero-overhead HTTP server for Bun
+ * Turbo helpers — zero-overhead router/json utilities for Bun Response paths.
  *
- * Design principles (based on Elysia/picohttpparser research):
- * 1. Use Bun.serve directly (native SIMD HTTP parsing)
- * 2. JIT-compile routes at startup (generate specialized code)
- * 3. Zero allocations in hot path
- * 4. Monomorphic call sites (consistent object shapes)
- * 5. Response passthrough (skip conversion when possible)
+ * HTTP accept/listen authority is NOT here. Parallel in-process Bun HTTP
+ * listen helpers were removed (prod audit P1): production must use serve()
+ * → @sylphx/gust-napi → crates/gust-core. See scripts/check-no-ts-backend.sh.
  *
- * Target: EXCEED bare Bun.serve performance via JIT compilation
+ * Remaining helpers:
+ * - turboRouter: JIT-compiled fetch handler composition (no socket bind)
+ * - turboJson: small JSON response cache
  */
 
 // ============================================================================
@@ -33,15 +32,6 @@ export interface TurboRouterConfig {
 	readonly routes: Record<string, TurboHandler>
 	readonly notFound?: TurboHandler
 	readonly onError?: (error: Error) => Response
-}
-
-/** Server options */
-export interface TurboServeOptions {
-	readonly port?: number
-	readonly hostname?: string
-	readonly fetch: TurboHandler
-	readonly onListen?: (info: { port: number; hostname: string }) => void
-	readonly onError?: (error: Error) => void
 }
 
 // ============================================================================
@@ -256,50 +246,6 @@ export const turboRouter = (config: TurboRouterConfig): { handler: TurboHandler 
 	const handler: TurboHandler = jitCompileHandler(routes, notFound, onError)
 
 	return { handler: handler }
-}
-
-// ============================================================================
-// Turbo Serve - Direct Bun.serve wrapper
-// ============================================================================
-
-/** Return type for turboServe */
-export interface TurboServerHandle {
-	readonly port: number
-	readonly hostname: string
-	readonly stop: () => void
-}
-
-/**
- * Start server using Bun.serve directly
- * Zero framework overhead - just routing
- */
-export const turboServe = (options: TurboServeOptions): TurboServerHandle => {
-	const port = options.port ?? 3000
-	const hostname = options.hostname ?? '0.0.0.0'
-
-	const server = Bun.serve({
-		port,
-		hostname,
-		fetch: options.fetch,
-		error: (error) => {
-			options.onError?.(error)
-			return RESPONSE_500
-		},
-	})
-
-	options.onListen?.({ port, hostname })
-
-	const serverPort: number = server.port ?? port
-	const serverHostname: string = server.hostname ?? hostname
-	const stop = (): void => {
-		server.stop()
-	}
-
-	return {
-		port: serverPort,
-		hostname: serverHostname,
-		stop: stop,
-	}
 }
 
 // ============================================================================

@@ -246,7 +246,9 @@ export {
 } from './native'
 
 // ============================================================================
-// Turbo Optimizations
+// Turbo Optimizations (router/json helpers only — no parallel HTTP serve)
 // ============================================================================
 
-export { turboServe } from './turbo'
+// Parallel Bun HTTP listen helpers are intentionally not re-exported.
+// HTTP authority is crates/gust-core via @sylphx/gust-napi (serve → native).
+// See scripts/check-no-ts-backend.sh.
