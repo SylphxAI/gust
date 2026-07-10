@@ -1,0 +1,276 @@
+{
+	"schemaVersion": 2,
+	"repo": "SylphxAI/gust",
+	"repoLedgerPath": "docs/specs/migration-ledger.json",
+	"lockedAt": "2026-07-10T12:00:00Z",
+	"adrRefs": [
+		{
+			"path": "docs/adr/ADR-PROPOSED-fleet-gust-rust-north-star.md",
+			"status": "proposed",
+			"note": "pending \u2014 ADR number will equal introducing PR per Doctrine"
+		}
+	],
+	"inventorySource": ["manual"],
+	"reauditRef": "rej-010",
+	"verificationRef": "verification/gust-cycle80-differential-green.json",
+	"inScopeBoundary": {
+		"includeGlobs": [
+			"crates/gust-core/**",
+			"crates/gust-wasm/**",
+			"crates/gust-napi/**",
+			"packages/server/**",
+			"packages/core/**"
+		],
+		"excludeGlobs": ["benchmarks/**", "website/**", "node_modules/**"]
+	},
+	"capabilities": [
+		{
+			"id": "rust-http-core",
+			"domain": "runtime",
+			"weight": 5,
+			"state": "authority_rust",
+			"rustSurface": "crates/gust-core/src/server.rs; router.rs; middleware/**",
+			"parityTest": "cargo test -p gust-core -p gust-router; crates/gust-core/src/server.rs#test_server_state",
+			"differentialTest": "crates/gust-core/tests/http_core_differential.rs",
+			"prodProbe": ".github/workflows/ci.yml; .github/workflows/napi.yml",
+			"promotionHold": {
+				"active": true,
+				"reason": "rej-010: differential_green at bound SHAs \u2014 promotion_hold until prod_audit_pass",
+				"rejectionRef": "rej-010",
+				"since": "2026-07-10T12:00:00Z"
+			},
+			"proof": {
+				"status": "differential_green",
+				"baselineTsSha": "ced601daa63c0badff0c6c7bdfb9bc9a3ad504f7",
+				"rustCandidateSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"lastComparedMainSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"mergeGroupSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"behaviorSpecHash": "d07536baff6e32a7c3d548e62a28080e18b58d4113dc414bbed0e7d0f9fe38aa",
+				"fixtureCorpusHash": "7e6478c8d295a3cc025e697b90f553e5e39b2863761559db49bbd542b0ec87eb",
+				"verifiedAt": "2026-07-10T10:39:24+00:00",
+				"verificationRef": "verification/gust-cycle80-differential-green.json",
+				"dependencyGlobs": [
+					"crates/gust-router/**",
+					"crates/gust-core/src/parser/**",
+					"crates/gust-wasm/src/parser.rs",
+					"packages/core/src/**",
+					"scripts/differential/**",
+					"scripts/run-gust-differential.sh"
+				]
+			},
+			"notes": "Downgraded ts_deleted\u2192authority_rust per rej-010. Foundation repo: Rust always authority; differential proves WASM consumer path matches native SSOT."
+		},
+		{
+			"id": "wasm-routing-runtime",
+			"domain": "runtime",
+			"weight": 4,
+			"state": "authority_rust",
+			"rustSurface": "crates/gust-wasm/src/router.rs",
+			"parityTest": "cargo test -p gust-wasm; crates/gust-wasm/src/parser.rs tests",
+			"differentialTest": "crates/gust-core/tests/http_core_differential.rs",
+			"prodProbe": ".github/workflows/ci.yml",
+			"promotionHold": {
+				"active": true,
+				"reason": "rej-010: differential_green at bound SHAs \u2014 promotion_hold until prod_audit_pass",
+				"rejectionRef": "rej-010",
+				"since": "2026-07-10T12:00:00Z"
+			},
+			"proof": {
+				"status": "differential_green",
+				"baselineTsSha": "ced601daa63c0badff0c6c7bdfb9bc9a3ad504f7",
+				"rustCandidateSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"lastComparedMainSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"mergeGroupSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"behaviorSpecHash": "d07536baff6e32a7c3d548e62a28080e18b58d4113dc414bbed0e7d0f9fe38aa",
+				"fixtureCorpusHash": "7e6478c8d295a3cc025e697b90f553e5e39b2863761559db49bbd542b0ec87eb",
+				"verifiedAt": "2026-07-10T10:39:24+00:00",
+				"verificationRef": "verification/gust-cycle80-differential-green.json",
+				"dependencyGlobs": [
+					"crates/gust-wasm/src/router.rs",
+					"packages/core/src/wasm/**",
+					"scripts/differential/**"
+				]
+			},
+			"notes": "WASM routing via gust-router SSOT; TS consumes compiled module only."
+		},
+		{
+			"id": "napi-native-bindings",
+			"domain": "runtime",
+			"weight": 4,
+			"state": "rust_impl",
+			"rustSurface": "crates/gust-napi/src/lib.rs",
+			"parityTest": "bun run test:napi (with built .node artifact per napi.yml)",
+			"prodProbe": ".github/workflows/napi.yml",
+			"promotionHold": {
+				"active": true,
+				"reason": "rej-010: no TS\u2194Rust differential harness yet \u2014 NAPI FFI smoke only",
+				"rejectionRef": "rej-010",
+				"since": "2026-07-10T12:00:00Z"
+			},
+			"proof": {
+				"status": "missing",
+				"dependencyGlobs": ["crates/gust-napi/**", ".github/workflows/napi.yml"],
+				"staleReason": "rej-010 re-audit \u2014 prior ts_deleted lacked differential proof; no TS backend baseline to oracle",
+				"verificationRef": "scripts/run-gust-differential.sh"
+			},
+			"notes": "NAPI bindings are Rust surface; differential harness for FFI round-trip pending."
+		},
+		{
+			"id": "ts-server-native-bridge",
+			"domain": "bindings",
+			"weight": 3,
+			"state": "rust_impl",
+			"tsSurface": "packages/server/src/native.ts; serve.ts#serveNative",
+			"rustSurface": "crates/gust-napi",
+			"parityTest": "packages/server/src/native.ts FFI load; scripts/check-no-ts-backend.sh PASS",
+			"prodProbe": "scripts/check-no-ts-backend.sh PASS; origin/main 77de195 PR #35 merged 2026-07-09",
+			"promotionHold": {
+				"active": true,
+				"reason": "rej-010: gate-only proof \u2014 no differential harness for FFI bridge yet",
+				"rejectionRef": "rej-010",
+				"since": "2026-07-10T12:00:00Z"
+			},
+			"proof": {
+				"status": "missing",
+				"dependencyGlobs": [
+					"packages/server/src/native.ts",
+					"packages/server/src/serve.ts",
+					"scripts/check-no-ts-backend.sh"
+				],
+				"staleReason": "rej-010 re-audit \u2014 prior ts_deleted lacked SHA-bound proof",
+				"verificationRef": "scripts/check-no-ts-backend.sh"
+			},
+			"notes": "JS/WASM HTTP fallbacks removed; native-only via gust-napi. check-no-ts-backend.sh is hard gate, not differential oracle."
+		},
+		{
+			"id": "ts-portable-app-layer",
+			"domain": "bindings",
+			"weight": 3,
+			"state": "rust_impl",
+			"tsSurface": "packages/core/**; packages/app/**",
+			"parityTest": "bun run test (turbo test via .github/workflows/ci.yml)",
+			"prodProbe": ".github/workflows/ci.yml",
+			"promotionHold": {
+				"active": true,
+				"reason": "rej-010: portable bindings retained \u2014 not backend authority; no ts_deleted claim",
+				"rejectionRef": "rej-010",
+				"since": "2026-07-10T12:00:00Z"
+			},
+			"proof": {
+				"status": "missing",
+				"dependencyGlobs": ["packages/app/**", "packages/core/**"],
+				"staleReason": "rej-010 re-audit \u2014 bindings layer not eligible for ts_deleted without canary proof",
+				"verificationRef": "scripts/run-gust-differential.sh"
+			},
+			"notes": "Portable app primitives per ADR-167 browser pillar; bindings remain, not backend authority."
+		},
+		{
+			"id": "middleware-security-stack",
+			"domain": "runtime",
+			"weight": 4,
+			"state": "authority_rust",
+			"rustSurface": "crates/gust-core/src/middleware/**",
+			"parityTest": "cargo test -p gust-core middleware::* tests (CORS, auth, rate-limit, session, otel)",
+			"differentialTest": "crates/gust-core/tests/http_core_differential.rs",
+			"prodProbe": ".github/workflows/ci.yml; .github/workflows/napi.yml",
+			"promotionHold": {
+				"active": true,
+				"reason": "rej-010: differential_green for trace.w3c subset at bound SHAs \u2014 full middleware corpus + prod_audit_pass pending",
+				"rejectionRef": "rej-010",
+				"since": "2026-07-10T12:00:00Z"
+			},
+			"proof": {
+				"status": "differential_green",
+				"baselineTsSha": "ced601daa63c0badff0c6c7bdfb9bc9a3ad504f7",
+				"rustCandidateSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"lastComparedMainSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"mergeGroupSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
+				"behaviorSpecHash": "d07536baff6e32a7c3d548e62a28080e18b58d4113dc414bbed0e7d0f9fe38aa",
+				"fixtureCorpusHash": "7e6478c8d295a3cc025e697b90f553e5e39b2863761559db49bbd542b0ec87eb",
+				"verifiedAt": "2026-07-10T10:39:24+00:00",
+				"verificationRef": "verification/gust-cycle80-differential-green.json",
+				"dependencyGlobs": [
+					"crates/gust-core/src/middleware/**",
+					"crates/gust-core/src/tracing/**",
+					"scripts/differential/**"
+				]
+			},
+			"notes": "Auth/CORS/rate-limit/session in Rust core; differential slice covers trace.w3c subset only."
+		}
+	],
+	"summary": {
+		"total": 6,
+		"ts_only": 0,
+		"contracted": 0,
+		"rust_impl": 3,
+		"parity_proven": 0,
+		"authority_rust": 3,
+		"ts_deleted": 0,
+		"proof_stale": 0,
+		"proof_missing": 3,
+		"completion_progress": 0,
+		"authority_progress": 0.5,
+		"verified_authority_progress": 0,
+		"weighted_progress": 0.5652,
+		"summaryNote": "rej-010/rej-011 \u2014 differential_green recorded for pilot harness slice; promotion_hold until prod_audit_pass",
+		"cycle50_delta": {
+			"rust_impl_verified": 1,
+			"slice": "http-core",
+			"verificationRef": "verification/gust-cycle50-http-core-rust-impl.json",
+			"notes": "rej-010 rust_impl ONLY \u2014 cycle50 highest-value unimplemented slice: http-core bounded differential (21 router+parse+trace cases)"
+		}
+	},
+	"priorClaims": {
+		"ts_deleted": 6,
+		"completion_progress": 1.0,
+		"authority_progress": 1.0,
+		"revertedAt": "2026-07-10T12:00:00Z",
+		"reason": "rej-010 promotion freeze \u2014 no SHA-bound differential or canary_green proof"
+	},
+	"cycle46Slice": "http-core \u2014 WASM oracle vs native Rust SSOT; bash scripts/run-gust-differential.sh",
+	"cycle46": {
+		"boundedSlice": "http-core",
+		"status": "rust_impl_on_disk_verified",
+		"reauditRef": "rej-010",
+		"verificationRef": "verification/gust-cycle46-http-core-rust-impl.json",
+		"deliverables": [
+			"scripts/run-gust-differential.sh",
+			"crates/gust-core/tests/http_core_differential.rs",
+			"scripts/differential/http-core-oracle.ts",
+			"scripts/differential/fixtures/http-core-corpus.json",
+			"docs/specs/http-core-parity-slice.json"
+		],
+		"caseCounts": {
+			"total": 21
+		},
+		"notes": "cycle46 pilot/P0 rej-010: HTTP core differential harness on-disk re-verify. rust_impl ONLY \u2014 proof.status missing until differential_green."
+	},
+	"cycle50Slice": "http-core \u2014 WASM oracle vs native Rust SSOT; bash scripts/run-gust-differential.sh",
+	"cycle50": {
+		"boundedSlice": "http-core",
+		"status": "rust_impl_on_disk_verified",
+		"reauditRef": "rej-010",
+		"verificationRef": "verification/gust-cycle50-http-core-rust-impl.json",
+		"harnessPath": "scripts/run-gust-differential.sh",
+		"deliverables": [
+			"scripts/run-gust-differential.sh",
+			"crates/gust-core/tests/http_core_differential.rs",
+			"scripts/differential/http-core-oracle.ts",
+			"scripts/differential/fixtures/http-core-corpus.json",
+			"docs/specs/http-core-parity-slice.json"
+		],
+		"caseCounts": {
+			"total": 21
+		},
+		"notes": "cycle50 rej-010: http-core bounded differential harness on-disk verify. rust_impl ONLY \u2014 proof.status missing until differential_green at bound SHAs."
+	},
+	"cycle80Slice": "http-core.router|http-core.parse|trace.w3c",
+	"cycle80": {
+		"boundedSlice": "http-core",
+		"status": "differential_green",
+		"reauditRef": "rej-010",
+		"verificationRef": "verification/gust-cycle80-differential-green.json",
+		"harnessPath": "scripts/run-gust-differential.sh",
+		"notes": "cycle80 pilot harness executed \u2014 differential_green at bound SHAs; promotion_hold until prod_audit_pass"
+	}
+}
