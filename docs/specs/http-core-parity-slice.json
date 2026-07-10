@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "slice": "http-core.router|http-core.parse|trace.w3c",
+  "repo": "SylphxAI/gust",
+  "capabilityIds": [
+    "rust-http-core",
+    "wasm-routing-runtime",
+    "middleware-security-stack"
+  ],
+  "description": "Bounded differential for Gust HTTP core SSOT: radix router, Method parse, W3C traceparent. Middleware security stack covered for W3C trace subset only.",
+  "harness": "scripts/run-gust-differential.sh",
+  "oracle": "scripts/differential/http-core-oracle.ts",
+  "corpus": "scripts/differential/fixtures/http-core-corpus.json",
+  "differentialTest": "crates/gust-core/tests/http_core_differential.rs#http_core_differential_matches_ts_oracle",
+  "gate": "scripts/check-no-ts-backend.sh",
+  "domains": [
+    {
+      "id": "http-core.router",
+      "rustSurface": "crates/gust-router (re-exported via gust-core::router)",
+      "notes": "Static / param / wildcard priority matching"
+    },
+    {
+      "id": "http-core.parse",
+      "rustSurface": "crates/gust-core/src/parser/method.rs",
+      "notes": "Method enum parse/from_str/from_u8/as_str SSOT shared with WASM"
+    },
+    {
+      "id": "trace.w3c",
+      "rustSurface": "crates/gust-core/src/tracing/w3c.rs",
+      "notes": "W3C traceparent parse/format; middleware-security-stack subset"
+    }
+  ],
+  "limitations": [
+    "Full HTTP buffer zero-copy parse lives in gust-wasm and is not in this corpus (method SSOT only)",
+    "CORS/auth/rate-limit/session middleware not yet in differential corpus",
+    "NAPI FFI round-trip out of scope for this slice",
+    "No capability promotion — promotion_hold until prod_audit_pass"
+  ],
+  "promotionPolicy": "NO_PROMOTIONS — promotion_hold active until prod_audit_pass"
+}
