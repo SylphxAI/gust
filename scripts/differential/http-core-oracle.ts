@@ -42,7 +42,7 @@ const METHODS: Record<string, number> = {
 }
 
 const METHOD_NAMES = Object.fromEntries(
-	Object.entries(METHODS).map(([name, code]) => [code, name]),
+	Object.entries(METHODS).map(([name, code]) => [code, name])
 ) as Record<number, string>
 
 function sha256File(path: string): string {
@@ -89,17 +89,19 @@ function insertNode(node: Node, segments: string[], handlerId: number): void {
 		const name = segment.slice(1) || '*'
 		node.wildcardChild = { name, handlerId }
 	} else {
-		if (!node.children.has(segment)) {
-			node.children.set(segment, emptyNode())
+		let child = node.children.get(segment)
+		if (!child) {
+			child = emptyNode()
+			node.children.set(segment, child)
 		}
-		insertNode(node.children.get(segment)!, rest, handlerId)
+		insertNode(child, rest, handlerId)
 	}
 }
 
 function findNode(
 	node: Node,
 	segments: string[],
-	params: [string, string][],
+	params: [string, string][]
 ): { handlerId: number; params: [string, string][] } | null {
 	if (segments.length === 0) {
 		if (node.handlerId == null) return null
@@ -133,17 +135,17 @@ function findNode(
 	return null
 }
 
-function routerLookup(
-	routes: RouteDef[],
-	method: string,
-	path: string,
-): Record<string, unknown> {
+function routerLookup(routes: RouteDef[], method: string, path: string): Record<string, unknown> {
 	const trees = new Map<string, Node>()
 	for (const route of routes) {
 		const key = route.method.toUpperCase()
-		if (!trees.has(key)) trees.set(key, emptyNode())
+		let tree = trees.get(key)
+		if (!tree) {
+			tree = emptyNode()
+			trees.set(key, tree)
+		}
 		const segments = route.path.split('/').filter(Boolean)
-		insertNode(trees.get(key)!, segments, route.handlerId)
+		insertNode(tree, segments, route.handlerId)
 	}
 	const tree = trees.get(method.toUpperCase())
 	if (!tree) return { found: false }
@@ -212,7 +214,7 @@ function parseTraceparent(header: string): Record<string, unknown> {
 function formatTraceparent(
 	traceId: string,
 	spanId: string,
-	traceFlags: number,
+	traceFlags: number
 ): Record<string, unknown> {
 	const flags = traceFlags.toString(16).padStart(2, '0')
 	return {
@@ -252,7 +254,7 @@ function evaluateCase(c: CorpusCase): Record<string, unknown> {
 				return formatTraceparent(
 					c.input.traceId as string,
 					c.input.spanId as string,
-					c.input.traceFlags as number,
+					c.input.traceFlags as number
 				)
 			}
 			throw new Error(`unknown trace kind ${kind} in case ${c.id}`)

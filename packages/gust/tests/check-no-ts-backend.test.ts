@@ -2,9 +2,9 @@
  * Gate regression: packages/server must not export or implement turboServe / Bun.serve.
  */
 import { describe, expect, test } from 'bun:test'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { spawnSync } from 'node:child_process'
 
 const repoRoot = join(import.meta.dir, '../../..')
 

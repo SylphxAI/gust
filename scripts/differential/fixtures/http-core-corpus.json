@@ -1,165 +1,165 @@
 {
-  "corpusVersion": 1,
-  "slice": "http-core.router|http-core.parse|trace.w3c",
-  "description": "Gust HTTP core bounded differential — TS contract oracle vs native Rust SSOT (rej-010). Foundation repo: no historical TS HTTP backend; oracle encodes consumer-facing WASM/core contract.",
-  "cases": [
-    {
-      "id": "router-static-root",
-      "domain": "http-core.router",
-      "input": {
-        "routes": [{ "method": "GET", "path": "/", "handlerId": 1 }],
-        "lookup": { "method": "GET", "path": "/" }
-      }
-    },
-    {
-      "id": "router-static-users",
-      "domain": "http-core.router",
-      "input": {
-        "routes": [
-          { "method": "GET", "path": "/users", "handlerId": 10 },
-          { "method": "POST", "path": "/users", "handlerId": 11 }
-        ],
-        "lookup": { "method": "GET", "path": "/users" }
-      }
-    },
-    {
-      "id": "router-param-id",
-      "domain": "http-core.router",
-      "input": {
-        "routes": [{ "method": "GET", "path": "/users/:id", "handlerId": 20 }],
-        "lookup": { "method": "GET", "path": "/users/42" }
-      }
-    },
-    {
-      "id": "router-nested-params",
-      "domain": "http-core.router",
-      "input": {
-        "routes": [
-          {
-            "method": "GET",
-            "path": "/posts/:postId/comments/:commentId",
-            "handlerId": 30
-          }
-        ],
-        "lookup": { "method": "GET", "path": "/posts/abc/comments/9" }
-      }
-    },
-    {
-      "id": "router-wildcard-files",
-      "domain": "http-core.router",
-      "input": {
-        "routes": [{ "method": "GET", "path": "/files/*path", "handlerId": 40 }],
-        "lookup": { "method": "GET", "path": "/files/a/b/c.txt" }
-      }
-    },
-    {
-      "id": "router-static-beats-param",
-      "domain": "http-core.router",
-      "input": {
-        "routes": [
-          { "method": "GET", "path": "/users/list", "handlerId": 50 },
-          { "method": "GET", "path": "/users/:id", "handlerId": 51 }
-        ],
-        "lookup": { "method": "GET", "path": "/users/list" }
-      }
-    },
-    {
-      "id": "router-method-miss",
-      "domain": "http-core.router",
-      "input": {
-        "routes": [{ "method": "GET", "path": "/health", "handlerId": 60 }],
-        "lookup": { "method": "POST", "path": "/health" }
-      }
-    },
-    {
-      "id": "router-path-miss",
-      "domain": "http-core.router",
-      "input": {
-        "routes": [{ "method": "GET", "path": "/health", "handlerId": 70 }],
-        "lookup": { "method": "GET", "path": "/ready" }
-      }
-    },
-    {
-      "id": "parse-method-get",
-      "domain": "http-core.parse",
-      "input": { "kind": "methodBytes", "bytes": "GET" }
-    },
-    {
-      "id": "parse-method-post",
-      "domain": "http-core.parse",
-      "input": { "kind": "methodBytes", "bytes": "POST" }
-    },
-    {
-      "id": "parse-method-delete",
-      "domain": "http-core.parse",
-      "input": { "kind": "methodBytes", "bytes": "DELETE" }
-    },
-    {
-      "id": "parse-method-invalid",
-      "domain": "http-core.parse",
-      "input": { "kind": "methodBytes", "bytes": "FOO" }
-    },
-    {
-      "id": "parse-method-from-str-case",
-      "domain": "http-core.parse",
-      "input": { "kind": "methodFromStr", "value": "patch" }
-    },
-    {
-      "id": "parse-method-from-u8",
-      "domain": "http-core.parse",
-      "input": { "kind": "methodFromU8", "code": 3 }
-    },
-    {
-      "id": "parse-method-from-u8-oob",
-      "domain": "http-core.parse",
-      "input": { "kind": "methodFromU8", "code": 9 }
-    },
-    {
-      "id": "parse-method-as-str-roundtrip",
-      "domain": "http-core.parse",
-      "input": { "kind": "methodAsStr", "code": 0 }
-    },
-    {
-      "id": "trace-valid-sampled",
-      "domain": "trace.w3c",
-      "input": {
-        "kind": "parse",
-        "header": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
-      }
-    },
-    {
-      "id": "trace-valid-unsampled",
-      "domain": "trace.w3c",
-      "input": {
-        "kind": "parse",
-        "header": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"
-      }
-    },
-    {
-      "id": "trace-invalid-version",
-      "domain": "trace.w3c",
-      "input": {
-        "kind": "parse",
-        "header": "01-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
-      }
-    },
-    {
-      "id": "trace-all-zero-trace-id",
-      "domain": "trace.w3c",
-      "input": {
-        "kind": "parse",
-        "header": "00-00000000000000000000000000000000-b7ad6b7169203331-01"
-      }
-    },
-    {
-      "id": "trace-format-roundtrip",
-      "domain": "trace.w3c",
-      "input": {
-        "kind": "format",
-        "traceId": "0af7651916cd43dd8448eb211c80319c",
-        "spanId": "b7ad6b7169203331",
-        "traceFlags": 1
-      }
-    }
-  ]
+	"corpusVersion": 1,
+	"slice": "http-core.router|http-core.parse|trace.w3c",
+	"description": "Gust HTTP core bounded differential — TS contract oracle vs native Rust SSOT (rej-010). Foundation repo: no historical TS HTTP backend; oracle encodes consumer-facing WASM/core contract.",
+	"cases": [
+		{
+			"id": "router-static-root",
+			"domain": "http-core.router",
+			"input": {
+				"routes": [{ "method": "GET", "path": "/", "handlerId": 1 }],
+				"lookup": { "method": "GET", "path": "/" }
+			}
+		},
+		{
+			"id": "router-static-users",
+			"domain": "http-core.router",
+			"input": {
+				"routes": [
+					{ "method": "GET", "path": "/users", "handlerId": 10 },
+					{ "method": "POST", "path": "/users", "handlerId": 11 }
+				],
+				"lookup": { "method": "GET", "path": "/users" }
+			}
+		},
+		{
+			"id": "router-param-id",
+			"domain": "http-core.router",
+			"input": {
+				"routes": [{ "method": "GET", "path": "/users/:id", "handlerId": 20 }],
+				"lookup": { "method": "GET", "path": "/users/42" }
+			}
+		},
+		{
+			"id": "router-nested-params",
+			"domain": "http-core.router",
+			"input": {
+				"routes": [
+					{
+						"method": "GET",
+						"path": "/posts/:postId/comments/:commentId",
+						"handlerId": 30
+					}
+				],
+				"lookup": { "method": "GET", "path": "/posts/abc/comments/9" }
+			}
+		},
+		{
+			"id": "router-wildcard-files",
+			"domain": "http-core.router",
+			"input": {
+				"routes": [{ "method": "GET", "path": "/files/*path", "handlerId": 40 }],
+				"lookup": { "method": "GET", "path": "/files/a/b/c.txt" }
+			}
+		},
+		{
+			"id": "router-static-beats-param",
+			"domain": "http-core.router",
+			"input": {
+				"routes": [
+					{ "method": "GET", "path": "/users/list", "handlerId": 50 },
+					{ "method": "GET", "path": "/users/:id", "handlerId": 51 }
+				],
+				"lookup": { "method": "GET", "path": "/users/list" }
+			}
+		},
+		{
+			"id": "router-method-miss",
+			"domain": "http-core.router",
+			"input": {
+				"routes": [{ "method": "GET", "path": "/health", "handlerId": 60 }],
+				"lookup": { "method": "POST", "path": "/health" }
+			}
+		},
+		{
+			"id": "router-path-miss",
+			"domain": "http-core.router",
+			"input": {
+				"routes": [{ "method": "GET", "path": "/health", "handlerId": 70 }],
+				"lookup": { "method": "GET", "path": "/ready" }
+			}
+		},
+		{
+			"id": "parse-method-get",
+			"domain": "http-core.parse",
+			"input": { "kind": "methodBytes", "bytes": "GET" }
+		},
+		{
+			"id": "parse-method-post",
+			"domain": "http-core.parse",
+			"input": { "kind": "methodBytes", "bytes": "POST" }
+		},
+		{
+			"id": "parse-method-delete",
+			"domain": "http-core.parse",
+			"input": { "kind": "methodBytes", "bytes": "DELETE" }
+		},
+		{
+			"id": "parse-method-invalid",
+			"domain": "http-core.parse",
+			"input": { "kind": "methodBytes", "bytes": "FOO" }
+		},
+		{
+			"id": "parse-method-from-str-case",
+			"domain": "http-core.parse",
+			"input": { "kind": "methodFromStr", "value": "patch" }
+		},
+		{
+			"id": "parse-method-from-u8",
+			"domain": "http-core.parse",
+			"input": { "kind": "methodFromU8", "code": 3 }
+		},
+		{
+			"id": "parse-method-from-u8-oob",
+			"domain": "http-core.parse",
+			"input": { "kind": "methodFromU8", "code": 9 }
+		},
+		{
+			"id": "parse-method-as-str-roundtrip",
+			"domain": "http-core.parse",
+			"input": { "kind": "methodAsStr", "code": 0 }
+		},
+		{
+			"id": "trace-valid-sampled",
+			"domain": "trace.w3c",
+			"input": {
+				"kind": "parse",
+				"header": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+			}
+		},
+		{
+			"id": "trace-valid-unsampled",
+			"domain": "trace.w3c",
+			"input": {
+				"kind": "parse",
+				"header": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"
+			}
+		},
+		{
+			"id": "trace-invalid-version",
+			"domain": "trace.w3c",
+			"input": {
+				"kind": "parse",
+				"header": "01-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+			}
+		},
+		{
+			"id": "trace-all-zero-trace-id",
+			"domain": "trace.w3c",
+			"input": {
+				"kind": "parse",
+				"header": "00-00000000000000000000000000000000-b7ad6b7169203331-01"
+			}
+		},
+		{
+			"id": "trace-format-roundtrip",
+			"domain": "trace.w3c",
+			"input": {
+				"kind": "format",
+				"traceId": "0af7651916cd43dd8448eb211c80319c",
+				"spanId": "b7ad6b7169203331",
+				"traceFlags": 1
+			}
+		}
+	]
 }
