@@ -42,13 +42,13 @@
 			"proof": {
 				"status": "canary_green",
 				"baselineTsSha": "ced601daa63c0badff0c6c7bdfb9bc9a3ad504f7",
-				"rustCandidateSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"lastComparedMainSha": "3cc72f0509952e5b609d49c8d4e524e774725ec2",
-				"mergeGroupSha": "3c89eb20ef1026f1d0a8ff17fbf0ca60b862854f",
+				"rustCandidateSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
+				"lastComparedMainSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
+				"mergeGroupSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
 				"behaviorSpecHash": "5b773cefbddd91db51f6d4bfe6343590396245303a2cba8508ab8096e6513866",
 				"fixtureCorpusHash": "24cc9a6b5d792044a93eb58f4101b91fa2a5ce8b4f8aa87622795a50f604d740",
-				"verifiedAt": "2026-07-11T11:05:10Z",
-				"verificationRef": "verification/gust-main-proof-differential-green-2026-07-10.json;implementer/receipts/GUST-CANARY-HTTP-CORE-TICK023/;audits/production-rust-audit-SylphxAI__gust-2026-07-11-tick014c.json",
+				"verifiedAt": "2026-07-11T23:14:13+01:00",
+				"verificationRef": "rust-first-fleet-control-plane/implementer/receipts/STALE-GREEN-PROOF-REBIND-TICK033/verification/gust-tip-differential.json",
 				"dependencyGlobs": [
 					"crates/gust-router/**",
 					"crates/gust-core/src/parser/**",
@@ -59,7 +59,7 @@
 				],
 				"imageDigest": "sha256:5694e89d5c5e39434d1567da26bfb781fd3099be26ce4f5cb93d930b339ea5f2",
 				"proofKind": "npm_consumer_serve_health_canary+prod_audit_pass",
-				"notes": "TICK023: canary_green at npm deploy unit @sylphx/gust-server@0.2.1 (gitHead=3c89eb2, imageDigest=sha256:5694e89d5c5e39434d1567da26bfb781fd3099be26ce4f5cb93d930b339ea5f2 = npm_tarball_sha256; integrity=sha512-mb/NMPoy8\u2026; optionalDep @sylphx/gust-napi@0.1.14). Live smoke 2026-07-11T11:05:10Z: npm install + serve({app}) GET /health \u2192 200 {\"ok\":true}; check-no-ts-backend PASS; dist turboServe/Bun.serve absent. Prior: prod_audit_pass tick014c + main_durable differential_green (21 cases) at 3cc72f0 ancestor of tip. state remains authority_rust; promotionHold.active=true; NO ts_deleted."
+				"notes": "TICK023: canary_green at npm deploy unit @sylphx/gust-server@0.2.1 (gitHead=3c89eb2, imageDigest=sha256:5694e89d5c5e39434d1567da26bfb781fd3099be26ce4f5cb93d930b339ea5f2 = npm_tarball_sha256; integrity=sha512-mb/NMPoy8\u2026; optionalDep @sylphx/gust-napi@0.1.14). Live smoke 2026-07-11T11:05:10Z: npm install + serve({app}) GET /health \u2192 200 {\"ok\":true}; check-no-ts-backend PASS; dist turboServe/Bun.serve absent. Prior: prod_audit_pass tick014c + main_durable differential_green (21 cases) at 3cc72f0 ancestor of tip. state remains authority_rust; promotionHold.active=true; NO ts_deleted. | STALE-GREEN-PROOF-REBIND-TICK033: tip-rebind at live main; differential reconfirm green (cases=21 router+parse+trace); lastCompared/mergeGroup/rustCandidate watermarked; NO new ts_deleted/authority; digest scripts not present \u2014 lastCompared only."
 			},
 			"notes": "TICK023 canary_green admitted (npm consumer serve/health). Foundation repo: Rust HTTP authority via gust-core + gust-napi; NO ts_deleted this packet. Prior rej-010 downgrade from overstated ts_deleted retained as authority_rust."
 		},
@@ -81,18 +81,19 @@
 			"proof": {
 				"status": "differential_green",
 				"baselineTsSha": "ced601daa63c0badff0c6c7bdfb9bc9a3ad504f7",
-				"rustCandidateSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"lastComparedMainSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"mergeGroupSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"behaviorSpecHash": "d07536baff6e32a7c3d548e62a28080e18b58d4113dc414bbed0e7d0f9fe38aa",
-				"fixtureCorpusHash": "7e6478c8d295a3cc025e697b90f553e5e39b2863761559db49bbd542b0ec87eb",
-				"verifiedAt": "2026-07-10T10:39:24+00:00",
-				"verificationRef": "verification/gust-cycle80-differential-green.json",
+				"rustCandidateSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
+				"lastComparedMainSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
+				"mergeGroupSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
+				"behaviorSpecHash": "5b773cefbddd91db51f6d4bfe6343590396245303a2cba8508ab8096e6513866",
+				"fixtureCorpusHash": "24cc9a6b5d792044a93eb58f4101b91fa2a5ce8b4f8aa87622795a50f604d740",
+				"verifiedAt": "2026-07-11T23:14:13+01:00",
+				"verificationRef": "rust-first-fleet-control-plane/implementer/receipts/STALE-GREEN-PROOF-REBIND-TICK033/verification/gust-tip-differential.json",
 				"dependencyGlobs": [
 					"crates/gust-wasm/src/router.rs",
 					"packages/core/src/wasm/**",
 					"scripts/differential/**"
-				]
+				],
+				"notes": "STALE-GREEN-PROOF-REBIND-TICK033: tip-rebind at live main; differential reconfirm green (cases=21 router+parse+trace); lastCompared/mergeGroup/rustCandidate watermarked; NO new ts_deleted/authority; digest scripts not present \u2014 lastCompared only."
 			},
 			"notes": "WASM routing via gust-router SSOT; TS consumes compiled module only."
 		},
@@ -185,18 +186,19 @@
 			"proof": {
 				"status": "differential_green",
 				"baselineTsSha": "ced601daa63c0badff0c6c7bdfb9bc9a3ad504f7",
-				"rustCandidateSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"lastComparedMainSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"mergeGroupSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"behaviorSpecHash": "d07536baff6e32a7c3d548e62a28080e18b58d4113dc414bbed0e7d0f9fe38aa",
-				"fixtureCorpusHash": "7e6478c8d295a3cc025e697b90f553e5e39b2863761559db49bbd542b0ec87eb",
-				"verifiedAt": "2026-07-10T10:39:24+00:00",
-				"verificationRef": "verification/gust-cycle80-differential-green.json",
+				"rustCandidateSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
+				"lastComparedMainSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
+				"mergeGroupSha": "316c0ad92b7afb7851576a6887b92b84f3500b38",
+				"behaviorSpecHash": "5b773cefbddd91db51f6d4bfe6343590396245303a2cba8508ab8096e6513866",
+				"fixtureCorpusHash": "24cc9a6b5d792044a93eb58f4101b91fa2a5ce8b4f8aa87622795a50f604d740",
+				"verifiedAt": "2026-07-11T23:14:13+01:00",
+				"verificationRef": "rust-first-fleet-control-plane/implementer/receipts/STALE-GREEN-PROOF-REBIND-TICK033/verification/gust-tip-differential.json",
 				"dependencyGlobs": [
 					"crates/gust-core/src/middleware/**",
 					"crates/gust-core/src/tracing/**",
 					"scripts/differential/**"
-				]
+				],
+				"notes": "STALE-GREEN-PROOF-REBIND-TICK033: tip-rebind at live main; differential reconfirm green (cases=21 router+parse+trace); lastCompared/mergeGroup/rustCandidate watermarked; NO new ts_deleted/authority; digest scripts not present \u2014 lastCompared only."
 			},
 			"notes": "Auth/CORS/rate-limit/session in Rust core; differential slice covers trace.w3c subset only."
 		}
