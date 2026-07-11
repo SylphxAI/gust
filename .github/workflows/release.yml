@@ -15,31 +15,15 @@ jobs:
     with:
       prebuild: bun run build
       postpublish: |
-        # Durable NAPI version sync: commit package versions onto main, then trigger publish.
-        # Ephemeral workspace edits alone are insufficient — workflow_dispatch checks out clean main.
-        VERSION=$(jq -r .version packages/gust/package.json)
-        echo "Syncing NAPI packages to version $VERSION"
-
-        cd crates/gust-napi
-        jq --arg v "$VERSION" '.version = $v | .optionalDependencies = (.optionalDependencies | with_entries(.value = $v))' package.json > tmp.json && mv tmp.json package.json
-
-        for dir in npm/*/; do
-          if [ -f "$dir/package.json" ]; then
-            jq --arg v "$VERSION" '.version = $v' "$dir/package.json" > tmp.json && mv tmp.json "$dir/package.json"
-            echo "Updated $dir to version $VERSION"
-          fi
-        done
-        cd ../..
-
-        if git diff --quiet -- crates/gust-napi; then
-          echo "NAPI packages already at $VERSION; dispatching publish from current main"
-          gh workflow run napi.yml -f publish=true
-        else
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/gust-napi
-          # [publish-napi] activates publish job on main push (see napi.yml if: condition)
-          git commit -m "chore(napi): sync versions to $VERSION [publish-napi]"
-          git push origin HEAD:main
+        # NAPI publish is delegated to napi.yml.
+        # Main is merge-queue protected — do NOT try to commit version sync here.
+        # Keep crates/gust-napi package versions on main via PR before release
+        # (or accept publish at the currently committed napi version).
+        NAPI_VERSION=$(jq -r .version crates/gust-napi/package.json)
+        GUST_VERSION=$(jq -r .version packages/gust/package.json)
+        echo "Dispatching NAPI publish for committed version $NAPI_VERSION (gust meta $GUST_VERSION)"
+        if [ "$NAPI_VERSION" != "$GUST_VERSION" ]; then
+          echo "::warning::NAPI version ($NAPI_VERSION) != @sylphx/gust ($GUST_VERSION). Publish will use committed NAPI version. Bump crates/gust-napi via PR to realign."
         fi
+        gh workflow run napi.yml -f publish=true
     secrets: inherit
