@@ -40,8 +40,9 @@ jobs:
           # Darwin arm64 (Apple Silicon)
           - host: macos-latest
             target: aarch64-apple-darwin
-          # Darwin x64 (Intel macOS)
-          - host: macos-13
+          # Darwin x64 (Intel macOS) — cross-compile on arm64 macos-latest
+          # (macos-13 runners are capacity-starved and blocked publish completion)
+          - host: macos-latest
             target: x86_64-apple-darwin
           # Linux x64 GNU (native build)
           - host: ubuntu-24.04
@@ -127,7 +128,7 @@ jobs:
           - target: aarch64-apple-darwin
             host: macos-latest
           - target: x86_64-apple-darwin
-            host: macos-13
+            host: macos-latest
           - target: x86_64-unknown-linux-gnu
             host: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
@@ -178,7 +179,17 @@ jobs:
           ls -la crates/gust-napi/
 
       - name: Test bindings
-        run: bun run test:napi
+        shell: bash
+        run: |
+          TARGET="${{ matrix.settings.target }}"
+          HOST_ARCH="$(uname -m)"
+          # Cross-built x86_64 macOS binaries cannot dlopen on arm64 hosts.
+          if [ "$TARGET" = "x86_64-apple-darwin" ] && [ "$HOST_ARCH" = "arm64" ]; then
+            echo "Skipping native load test for cross-compiled $TARGET on $HOST_ARCH host"
+            ls -la crates/gust-napi/*.node
+            exit 0
+          fi
+          bun run test:napi
 
   publish:
     name: Publish
@@ -217,10 +228,20 @@ jobs:
 
       - name: Publish platform packages
         run: |
+          set -euo pipefail
           cd crates/gust-napi/npm
+          published=0
           for dir in */; do
-            if [ -f "$dir/package.json" ]; then
-              echo "Packing and auditing $dir..."
+            if [ ! -f "$dir/package.json" ]; then
+              continue
+            fi
+            # Only publish platforms that have a built .node artifact (skip musl stubs, etc.)
+            if ! compgen -G "$dir"/*.node > /dev/null; then
+              echo "Skipping $dir — no .node artifact present"
+              continue
+            fi
+            echo "Packing and auditing $dir..."
+            (
               cd "$dir"
               TARBALL=$(npm pack --silent)
               tar -xOf "$TARBALL" package/package.json > "$RUNNER_TEMP/gust-napi-platform.package.json"
@@ -229,10 +250,22 @@ jobs:
                 cat "$RUNNER_TEMP/gust-napi-platform.package.json"
                 exit 1
               fi
-              npm publish "$TARBALL" --access public --provenance || true
-              cd ..
-            fi
+              # Allow E409 already-exists; fail other publish errors
+              if ! out=$(npm publish "$TARBALL" --access public --provenance 2>&1); then
+                echo "$out"
+                if echo "$out" | grep -qiE 'cannot publish over|EPUBLISHCONFLICT|E409|previously published'; then
+                  echo "Version already published for $dir — continuing"
+                else
+                  echo "::error::npm publish failed for $dir"
+                  exit 1
+                fi
+              else
+                echo "$out"
+                published=$((published+1))
+              fi
+            )
           done
+          echo "Published (or confirmed) platform packages; new publishes this run tracked above"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

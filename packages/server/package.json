@@ -27,7 +27,7 @@
 		"@sylphx/gust-core": "workspace:*"
 	},
 	"optionalDependencies": {
-		"@sylphx/gust-napi": "0.1.7"
+		"@sylphx/gust-napi": "0.1.14"
 	},
 	"devDependencies": {
 		"@types/node": "^24.10.1",
