@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+### Patch Changes
+
+- ef79189: Fix optionalDependencies pin for @sylphx/gust-napi to a registry-published version so npm install resolves the native binding.
+
 ## 0.2.0
 
 ### Minor Changes
