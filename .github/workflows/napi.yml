@@ -193,7 +193,8 @@ jobs:
 
   publish:
     name: Publish
-    runs-on: [self-hosted, sylphx, linux, standard]
+    # Must be github-hosted: npm --provenance rejects self-hosted runners (E422).
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
