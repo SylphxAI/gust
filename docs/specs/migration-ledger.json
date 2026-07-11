@@ -32,23 +32,23 @@
 			"rustSurface": "crates/gust-core/src/server.rs; router.rs; middleware/**",
 			"parityTest": "cargo test -p gust-core -p gust-router; crates/gust-core/src/server.rs#test_server_state",
 			"differentialTest": "crates/gust-core/tests/http_core_differential.rs",
-			"prodProbe": ".github/workflows/ci.yml; .github/workflows/napi.yml",
+			"prodProbe": "npm install @sylphx/gust-server@0.2.1; serve() GET /health 200; scripts/check-no-ts-backend.sh PASS; implementer/receipts/GUST-CANARY-HTTP-CORE-TICK023/artifacts/serve-health-smoke.json",
 			"promotionHold": {
 				"active": true,
-				"reason": "rej-010: differential_green at bound SHAs \u2014 promotion_hold until prod_audit_pass",
+				"reason": "rej-010: canary_green + npm tarball digest admitted for rust-http-core @ sha256:5694e89d5c5e39434d1567da26bfb781fd3099be26ce4f5cb93d930b339ea5f2 / @sylphx/gust-server@0.2.1 \u2014 promotion_hold remains until formal ts_deleted admission (full ladder; no state flip this tick)",
 				"rejectionRef": "rej-010",
 				"since": "2026-07-10T12:00:00Z"
 			},
 			"proof": {
-				"status": "differential_green",
+				"status": "canary_green",
 				"baselineTsSha": "ced601daa63c0badff0c6c7bdfb9bc9a3ad504f7",
 				"rustCandidateSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"lastComparedMainSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"mergeGroupSha": "77de195f6a8703c09ff4dff828d9724082908fbf",
-				"behaviorSpecHash": "d07536baff6e32a7c3d548e62a28080e18b58d4113dc414bbed0e7d0f9fe38aa",
-				"fixtureCorpusHash": "7e6478c8d295a3cc025e697b90f553e5e39b2863761559db49bbd542b0ec87eb",
-				"verifiedAt": "2026-07-10T10:39:24+00:00",
-				"verificationRef": "verification/gust-cycle80-differential-green.json",
+				"lastComparedMainSha": "3cc72f0509952e5b609d49c8d4e524e774725ec2",
+				"mergeGroupSha": "3c89eb20ef1026f1d0a8ff17fbf0ca60b862854f",
+				"behaviorSpecHash": "5b773cefbddd91db51f6d4bfe6343590396245303a2cba8508ab8096e6513866",
+				"fixtureCorpusHash": "24cc9a6b5d792044a93eb58f4101b91fa2a5ce8b4f8aa87622795a50f604d740",
+				"verifiedAt": "2026-07-11T11:05:10Z",
+				"verificationRef": "verification/gust-main-proof-differential-green-2026-07-10.json;implementer/receipts/GUST-CANARY-HTTP-CORE-TICK023/;audits/production-rust-audit-SylphxAI__gust-2026-07-11-tick014c.json",
 				"dependencyGlobs": [
 					"crates/gust-router/**",
 					"crates/gust-core/src/parser/**",
@@ -56,9 +56,12 @@
 					"packages/core/src/**",
 					"scripts/differential/**",
 					"scripts/run-gust-differential.sh"
-				]
+				],
+				"imageDigest": "sha256:5694e89d5c5e39434d1567da26bfb781fd3099be26ce4f5cb93d930b339ea5f2",
+				"proofKind": "npm_consumer_serve_health_canary+prod_audit_pass",
+				"notes": "TICK023: canary_green at npm deploy unit @sylphx/gust-server@0.2.1 (gitHead=3c89eb2, imageDigest=sha256:5694e89d5c5e39434d1567da26bfb781fd3099be26ce4f5cb93d930b339ea5f2 = npm_tarball_sha256; integrity=sha512-mb/NMPoy8\u2026; optionalDep @sylphx/gust-napi@0.1.14). Live smoke 2026-07-11T11:05:10Z: npm install + serve({app}) GET /health \u2192 200 {\"ok\":true}; check-no-ts-backend PASS; dist turboServe/Bun.serve absent. Prior: prod_audit_pass tick014c + main_durable differential_green (21 cases) at 3cc72f0 ancestor of tip. state remains authority_rust; promotionHold.active=true; NO ts_deleted."
 			},
-			"notes": "Downgraded ts_deleted\u2192authority_rust per rej-010. Foundation repo: Rust always authority; differential proves WASM consumer path matches native SSOT."
+			"notes": "TICK023 canary_green admitted (npm consumer serve/health). Foundation repo: Rust HTTP authority via gust-core + gust-napi; NO ts_deleted this packet. Prior rej-010 downgrade from overstated ts_deleted retained as authority_rust."
 		},
 		{
 			"id": "wasm-routing-runtime",
@@ -208,11 +211,14 @@
 		"ts_deleted": 0,
 		"proof_stale": 0,
 		"proof_missing": 3,
-		"completion_progress": 0,
+		"canary_green": 1,
+		"differential_green": 2,
+		"completion_progress": 0.0,
 		"authority_progress": 0.5,
-		"verified_authority_progress": 0,
-		"weighted_progress": 0.5652,
-		"summaryNote": "rej-010/rej-011 \u2014 differential_green recorded for pilot harness slice; promotion_hold until prod_audit_pass",
+		"verified_authority_progress": 0.16666666666666666,
+		"weighted_progress": 0.6261,
+		"summaryNote": "tick023 http-core canary_green admission \u2014 rust-http-core proof.status=canary_green with imageDigest=npm_tarball_sha256 (sha256:5694e89d5c5e39434d1567da26bfb781fd3099be26ce4f5cb93d930b339ea5f2) @ @sylphx/gust-server@0.2.1 + napi@0.1.14; live serve /health 200; prod_audit_pass tick014c retained; state remains authority_rust; wasm-routing-runtime + middleware-security-stack remain differential_green only (smoke does not cover WASM path or full middleware corpus); 3\u00d7 rust_impl still proof_missing; promotion_hold (rej-010) retained; ts_deleted=0; completion_progress=0; no freeze lift",
+		"imageDigestBoundCaps": 1,
 		"cycle50_delta": {
 			"rust_impl_verified": 1,
 			"slice": "http-core",
@@ -272,5 +278,54 @@
 		"verificationRef": "verification/gust-cycle80-differential-green.json",
 		"harnessPath": "scripts/run-gust-differential.sh",
 		"notes": "cycle80 pilot harness executed \u2014 differential_green at bound SHAs; promotion_hold until prod_audit_pass"
+	},
+	"tick023Slice": "http-core.rust-http-core canary_green+npmDigest",
+	"tick023": {
+		"packetId": "GUST-CANARY-HTTP-CORE-TICK023",
+		"status": "canary_green_admitted",
+		"boundedSlice": "rust-http-core",
+		"boundSha": "3c89eb20ef1026f1d0a8ff17fbf0ca60b862854f",
+		"featureSha": "3cc72f0509952e5b609d49c8d4e524e774725ec2",
+		"mainTipAtAdmission": "3c89eb20ef1026f1d0a8ff17fbf0ca60b862854f",
+		"imageDigest": "sha256:5694e89d5c5e39434d1567da26bfb781fd3099be26ce4f5cb93d930b339ea5f2",
+		"imageDigestKind": "npm_tarball_sha256",
+		"primaryPackage": "@sylphx/gust-server@0.2.1",
+		"primaryPackageGitHead": "3c89eb20ef1026f1d0a8ff17fbf0ca60b862854f",
+		"primaryPackageIntegrity": "sha512-mb/NMPoy8Sv+cBiDrgOM1g49LgFZl5RA+P1Ii9NgzAx0K/RDcsCbnzcX5+EetAdOWDDsA9M//ZAVhnpjFCvI9A==",
+		"napiVersion": "0.1.14",
+		"napiPlatformsBound": ["darwin-arm64", "darwin-x64", "linux-x64-gnu", "linux-arm64-gnu"],
+		"canaryAt": "2026-07-11T11:05:10Z",
+		"canaryProbes": {
+			"npm_install_gust_server_0.2.1": "pass",
+			"napi_load": "pass",
+			"serve_listen": "pass",
+			"GET /health": "pass_200_ok",
+			"check_no_ts_backend": "pass",
+			"dist_turboServe_absent": "pass"
+		},
+		"capsAdmitted": ["rust-http-core"],
+		"capsDeferred": [
+			"wasm-routing-runtime (smoke is NAPI not WASM)",
+			"middleware-security-stack (trace.w3c subset only; full corpus pending)",
+			"napi-native-bindings (smoke supports; not http-core slice; residual)",
+			"ts-server-native-bridge (smoke supports; not http-core slice; residual)",
+			"ts-portable-app-layer (BYO portable; not server authority)"
+		],
+		"stateUnchanged": "authority_rust",
+		"tsDeleted": 0,
+		"promotionHoldActive": true,
+		"prodAuditRef": "audits/production-rust-audit-SylphxAI__gust-2026-07-11-tick014c.json",
+		"mainProofRef": "verification/gust-main-proof-differential-green-2026-07-10.json",
+		"receiptRef": "implementer/receipts/GUST-CANARY-HTTP-CORE-TICK023/",
+		"mustNot": [
+			"ts_deleted",
+			"lift_rej-010",
+			"lift_rej-011",
+			"REPO_COMPLETE",
+			"FCP",
+			"close_LIB-DIGEST-EXC without orchestrator"
+		],
+		"notes": "Smallest honest residual after prod_audit_pass tick014c: stamp canary_green + npm tarball sha256 as imageDigest equivalent on rust-http-core only (the http-core cap that serve/health smoke supports). No ts_deleted. No freeze lift. No redeploy/republish.",
+		"nextResidual": "GUST-CANARY-BRIDGE-NAPI or GUST-TS-DELETED-ADMISSION after full ladder"
 	}
 }
