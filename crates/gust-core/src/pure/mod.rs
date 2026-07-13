@@ -22,3 +22,6 @@ pub use security_headers::{build_security_headers, format_hsts, SecurityOptions}
 
 pub mod http_range;
 pub use http_range::{content_range, is_range_satisfiable, is_websocket_upgrade, parse_range, sticky_session, ByteRange, ParsedRange};
+
+pub mod sse_format;
+pub use sse_format::{format_sse, format_sse_event, sse_event, sse_headers_block};
