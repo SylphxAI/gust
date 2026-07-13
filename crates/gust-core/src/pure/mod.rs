@@ -13,3 +13,6 @@ pub use rate_limit_math::{
 
 pub use body_size::{exceeds_limit, format_size, parse_size_bytes, parse_size_str};
 pub use cors_origin::{create_cors_headers, get_allowed_origin, is_origin_allowed};
+
+pub mod cookie;
+pub use cookie::{delete_cookie, parse_cookies, serialize_cookie, CookieOptions};
