@@ -19,3 +19,6 @@ pub use cookie::{delete_cookie, parse_cookies, serialize_cookie, CookieOptions};
 
 pub mod security_headers;
 pub use security_headers::{build_security_headers, format_hsts, SecurityOptions};
+
+pub mod http_range;
+pub use http_range::{content_range, is_range_satisfiable, is_websocket_upgrade, parse_range, sticky_session, ByteRange, ParsedRange};
