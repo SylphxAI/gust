@@ -18,6 +18,7 @@ pub mod request;
 pub mod response;
 pub mod router;
 pub mod middleware;
+pub mod pure;
 pub mod handlers;
 pub mod tracing;
 
@@ -38,6 +39,7 @@ pub use router::{Router, Match};
 
 // Middleware re-exports
 pub use middleware::{Middleware, MiddlewareChain};
+pub use pure::{parse_client_ip, fixed_window_decision, sliding_window_decision, rate_limit_headers, RateLimitDecision};
 
 // Handlers re-exports
 pub use handlers::{
