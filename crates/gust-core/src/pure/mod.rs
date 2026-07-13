@@ -16,3 +16,6 @@ pub use cors_origin::{create_cors_headers, get_allowed_origin, is_origin_allowed
 
 pub mod cookie;
 pub use cookie::{delete_cookie, parse_cookies, serialize_cookie, CookieOptions};
+
+pub mod security_headers;
+pub use security_headers::{build_security_headers, format_hsts, SecurityOptions};
