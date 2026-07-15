@@ -1,19 +1,18 @@
-# Agent Instructions
+# gust — local agent notes only
 
-Engineering doctrine: https://github.com/SylphxAI/doctrine
+Doctrine and fleet delivery law live in the **host always-on constitution**
+(`~/.grok/AGENTS.md` / Doctrine template). This file must **not** restate,
+weaken, or fork that law (including PR-vs-direct-trunk delivery).
 
-Before changing behavior, read:
+Local truth: `PROJECT.md`, `.doctrine/project.json` when present.
 
-1. `PROJECT.md` for this repository's goal, lifecycle, boundary, public
-   surfaces, delivery proof, and package release posture.
-2. `.doctrine/project.json` for the machine-readable project manifest.
-3. `README.md`, package READMEs, and relevant workflow files for local facts.
-4. The central doctrine entry points and triggered standards.
+## Boundary hazards
 
-This file is a thin runtime adapter. Keep enterprise policy in doctrine; keep
-repo-local commands, hazards, and validation notes here.
+- Gust is a public HTTP framework package family. Routing, middleware, auth,
+- Rust/WASM/NAPI outputs and platform packages are release artifacts. Published
+- Keep portable app, server/native, and core WASM boundaries separate; do not
 
-## Local Commands
+## Local commands
 
 - `bun install` - install dependencies.
 - `bun run lint` - Biome check.
@@ -21,19 +20,10 @@ repo-local commands, hazards, and validation notes here.
 - `bun run typecheck` - TypeScript type check.
 - `bun run test` - run package tests.
 - `bun run build:napi` - build native bindings when touching NAPI/Rust code.
+- Prefer the **narrowest** affected check before full workspace runs.
+- Report layers honestly: local diff · trunk FF · deploy · prod proof (do not collapse).
 
-## Local Hazards
+## Validation notes
 
-- Gust is a public HTTP framework package family. Routing, middleware, auth,
-  validation, streaming, WebSocket, SSE, native bindings, and benchmark claims
-  are public contracts.
-- Rust/WASM/NAPI outputs and platform packages are release artifacts. Published
-  npm versions are forward-fix-only.
-- Keep portable app, server/native, and core WASM boundaries separate; do not
-  put product-specific app behavior into the framework core.
-
-## Reporting
-
-Separate local diff, PR state, CI/admission state, merge state, npm release
-state, native-binding publish state, and package registry proof.
-
+- Prefer the **narrowest** affected check before full workspace runs.
+- Report layers honestly: local diff · trunk FF · deploy · prod proof (do not collapse).
